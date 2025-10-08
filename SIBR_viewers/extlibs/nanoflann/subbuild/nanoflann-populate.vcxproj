@@ -1,0 +1,301 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{2A3A4870-3391-32D2-BCB6-EC0C32D526EE}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>nanoflann-populate</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-mkdir.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Creating directories for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\Cmake\bin\cmake.exe -Dcfgdir=/Debug -P "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/tmp/nanoflann-populate-mkdirs.cmake"
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-mkdir"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-mkdir</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-download.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Performing download step (git clone) for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -P "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/tmp/nanoflann-populate-gitclone.cmake"
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-download"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\nanoflann-populate-gitinfo.txt;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-mkdir;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-download</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-update.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Performing update step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\nanoflann"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -Dcan_fetch=YES -P "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/tmp/nanoflann-populate-gitupdate.cmake"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\tmp\nanoflann-populate-gitupdate.cmake;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\nanoflann-populate-update-info.txt;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-download;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-update</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-patch.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No patch step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\Cmake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-patch"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\nanoflann-populate-patch-info.txt;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-update;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-patch</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-configure.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No configure step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\build"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-configure"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\tmp\nanoflann-populate-cfgcmd.txt;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-patch;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-configure</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-build.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No build step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\build"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-build"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-configure;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-build</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-install.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No install step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\build"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-install"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-build;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-install</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\50164d96dd9d521a3230fcbf1a2ce7c3\nanoflann-populate-test.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">No test step for 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd "D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\build"
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-test"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-install;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-test</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\1bc269c3734cfe18832e9b3973f2c0b8\nanoflann-populate-complete.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Completed 'nanoflann-populate'</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\Cmake\bin\cmake.exe -E make_directory "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/Debug"
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/Debug/nanoflann-populate-complete"
+if %errorlevel% neq 0 goto :cmEnd
+D:\Cmake\bin\cmake.exe -E touch "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug/nanoflann-populate-done"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-install;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-mkdir;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-download;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-update;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-patch;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-configure;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-build;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\src\nanoflann-populate-stamp\Debug\nanoflann-populate-test;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\Debug\nanoflann-populate-complete</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\45fed78ecc4c87575f2265b4613fc835\nanoflann-populate.rule">
+      <BuildInParallel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</BuildInParallel>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'"></Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\Debug\nanoflann-populate-complete;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\nanoflann-populate</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\Cmake\bin\cmake.exe "-SD:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild" "-BD:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild" --check-stamp-file "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/generate.stamp"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Cmake\share\cmake-3.28\Modules\CMakeDetermineSystem.cmake;D:\Cmake\share\cmake-3.28\Modules\CMakeGenericSystem.cmake;D:\Cmake\share\cmake-3.28\Modules\CMakeInitializeConfigs.cmake;D:\Cmake\share\cmake-3.28\Modules\CMakeSystem.cmake.in;D:\Cmake\share\cmake-3.28\Modules\CMakeSystemSpecificInformation.cmake;D:\Cmake\share\cmake-3.28\Modules\CMakeSystemSpecificInitialize.cmake;D:\Cmake\share\cmake-3.28\Modules\ExternalProject.cmake;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\PatchInfo.txt.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\RepositoryInfo.txt.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\UpdateInfo.txt.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\cfgcmd.txt.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\gitclone.cmake.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\gitupdate.cmake.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\mkdirs.cmake.in;D:\Cmake\share\cmake-3.28\Modules\ExternalProject\shared_internal_commands.cmake;D:\Cmake\share\cmake-3.28\Modules\Platform\Windows-Initialize.cmake;D:\Cmake\share\cmake-3.28\Modules\Platform\Windows.cmake;D:\Cmake\share\cmake-3.28\Modules\Platform\WindowsPaths.cmake;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\3.28.0-rc4\CMakeSystem.cmake;D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\nanoflann-populate-prefix\tmp\nanoflann-populate-mkdirs.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\CMakeFiles\nanoflann-populate">
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\nanoflann\subbuild\ZERO_CHECK.vcxproj">
+      <Project>{753AAC39-38C7-3C25-AF11-0DD93B10AB62}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

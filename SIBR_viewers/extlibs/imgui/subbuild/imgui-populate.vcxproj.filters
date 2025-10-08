@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\a4c0285d2edba9f0eec6c42461a064b0\imgui-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\ac6b57a966d8cdbccc7536b2f33d87db\imgui-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\2436dd5fc6c5bbc026837770c15695da\imgui-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\Documents\Python Projects\Octree-GS\SIBR_viewers\extlibs\imgui\subbuild\CMakeFiles\imgui-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{02B58505-FEF2-3A92-B428-E080BEFF8EB3}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

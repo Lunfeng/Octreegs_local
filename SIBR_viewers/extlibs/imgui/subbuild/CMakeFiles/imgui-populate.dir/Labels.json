@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/imgui-populate"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/2436dd5fc6c5bbc026837770c15695da/imgui-populate.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/ac6b57a966d8cdbccc7536b2f33d87db/imgui-populate-complete.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-build.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-configure.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-download.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-install.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-mkdir.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-patch.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-test.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/a4c0285d2edba9f0eec6c42461a064b0/imgui-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"imgui-populate"
+		],
+		"name" : "imgui-populate"
+	}
+}

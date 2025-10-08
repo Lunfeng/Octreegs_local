@@ -1,4 +1,4 @@
-scene="db/playroom"
+scene="/data/ljw/Code/Dataset/bicycle"
 exp_name="baseline"
 gpu=-1
 ratio=1

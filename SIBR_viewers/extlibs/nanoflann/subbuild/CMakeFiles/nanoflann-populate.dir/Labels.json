@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/nanoflann-populate"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/45fed78ecc4c87575f2265b4613fc835/nanoflann-populate.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/1bc269c3734cfe18832e9b3973f2c0b8/nanoflann-populate-complete.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-build.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-configure.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-download.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-install.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-mkdir.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-patch.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-test.rule"
+		},
+		{
+			"file" : "D:/Documents/Python Projects/Octree-GS/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/50164d96dd9d521a3230fcbf1a2ce7c3/nanoflann-populate-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"nanoflann-populate"
+		],
+		"name" : "nanoflann-populate"
+	}
+}
