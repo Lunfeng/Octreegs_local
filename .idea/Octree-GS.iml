@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/CompilerIdC/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/CompilerIdC/tmp" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/CompilerIdCXX/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/CompilerIdCXX/tmp" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/CMakeScratch" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/core" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/basic/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/basic/apps/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/basic/apps/pointBased/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/basic/apps/texturedMesh/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/basic/renderer" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/gaussianviewer/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/gaussianviewer/apps/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/gaussianviewer/apps/gaussianViewer/CMakeFiles" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/build/src/projects/gaussianviewer/renderer" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/cudarasterizer-populate-prefix/src/cudarasterizer-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/CudaRasterizer/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/bimap/detail/debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/log" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/logic" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/preprocessor/debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/preprocessor/logical" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/spirit/home/classic/debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/test/data" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/units/base_units/temperature" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/boost/boost-1.71/boost/units/systems/temperature" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/eigen3/eigen/include/unsupported/Eigen/CXX11/src/TensorSymmetry/util" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/glfw/glfw-3.2.1/lib/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/imgui-populate-prefix/src/imgui-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/imgui/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/mrf-populate-prefix/src/mrf-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/mrf/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/nanoflann-populate-prefix/src/nanoflann-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/nanoflann/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/picojson-populate-prefix/src/picojson-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/picojson/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/rapidxml-populate-prefix/src/rapidxml-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/rapidxml/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/build" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/3.28.0-rc4/VCTargetsPath/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/3.28.0-rc4/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/3.28.0-rc4/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/CMakeFiles/pkgRedirects" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/x64" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/x64/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/SIBR_viewers/extlibs/xatlas/subbuild/xatlas-populate-prefix/src/xatlas-populate-stamp/Debug" />
+      <excludeFolder url="file://$MODULE_DIR$/data" />
+      <excludeFolder url="file://$MODULE_DIR$/outputs" />
+    </content>
+    <orderEntry type="jdk" jdkName="server 3dgs conda" jdkType="Python SDK" />
+    <orderEntry type="sourceFolder" forTests="false" />
+  </component>
+  <component name="PyDocumentationSettings">
+    <option name="format" value="PLAIN" />
+    <option name="myDocStringFormat" value="Plain" />
+  </component>
+</module>
