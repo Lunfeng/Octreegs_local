@@ -161,6 +161,26 @@ class OptimizationParams(ParamGroup):
         self.success_threshold = 0.8
         self.densify_grad_threshold = 0.0002
 
+        self.enable_pruning = False
+        self.prune_metric = "composite"       # "grad" | "opacity" | "visits" | "composite"
+        self.prune_grad_weight = 1.0
+        self.prune_opacity_weight = 0.5
+        self.prune_visit_weight = 0.5
+
+        self.prune_from = 10000               # 启动剪枝的最早迭代
+        self.prune_interval = 2000            # 剪枝间隔
+        self.prune_until = 30000              # 停止剪枝的最晚迭代
+
+        self.prune_percentile = 0.10          # 排名式保留 top-(1 - percentile)，与 threshold 二选一
+        self.prune_threshold = None           # 若设置，则使用阈值式（在归一化后空间）
+
+        self.prune_per_level = True           # 分层评估/筛选，避免层间偏置
+        self.prune_min_keep_per_level = 64    # 每层至少保留
+        self.prune_protect_first_levels = 1   # 保护最粗若干层，通常 1 即可
+
+        self.prune_refine_steps = 500         # 剪枝后短期微调步数（用抑制 densification 的方式实现）
+        self.reset_stats_after_prune = False  # 若启用，每次剪枝后清零统计重新累计
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

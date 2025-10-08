@@ -35,7 +35,7 @@ class GaussianModel:
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        
+
         self.scaling_activation = torch.exp
         self.scaling_inverse_activation = torch.log
 
@@ -903,6 +903,212 @@ class GaussianModel:
 
         if prune_mask.shape[0]>0:
             self.prune_anchor(prune_mask)
+
+    @torch.no_grad()
+    def compute_importance(
+            self,
+            metric: str = "composite",  # "grad" | "opacity" | "visits" | "composite"
+            weights: tuple = (1.0, 0.5, 0.5),  # (w_grad, w_opacity, w_visits) for composite
+            per_level: bool = True,
+            eps: float = 1e-8,
+            normalize: str = "minmax"  # "minmax" | "log" | "none"
+    ) -> torch.Tensor:
+        """
+        返回形状 [N_anchor] 的重要性分数。
+        已依赖的统计量：
+          - self.offset_gradient_accum: [N_anchor*n_offsets, 1]
+          - self.offset_denom:          [N_anchor*n_offsets, 1]
+          - self.opacity_accum:         [N_anchor, 1]
+          - self.anchor_demon:          [N_anchor, 1]  (访问频次)
+        """
+        N = self.get_anchor.shape[0]
+        n_off = self.n_offsets
+
+        # 1) anchor 级梯度强度（对每个 anchor 聚合 n_offsets）
+        grad_acc = self.offset_gradient_accum.view(N, n_off, 1)
+        grad_den = self.offset_denom.view(N, n_off, 1)
+        grad_mean = (grad_acc / (grad_den + eps)).clamp_min_(0.0).mean(dim=1).view(N)  # [N]
+
+        # 2) opacity 累积
+        opa = self.opacity_accum.view(N).clamp_min_(0.0)
+
+        # 3) 访问频率
+        vis = self.anchor_demon.view(N).clamp_min_(0.0)
+
+        # 归一化（避免量纲差异），默认 per-level minmax
+        def norm_by_level(x: torch.Tensor) -> torch.Tensor:
+            if not per_level:
+                if normalize == "minmax":
+                    minv, maxv = torch.quantile(x, 0.0), torch.quantile(x, 0.999)  # 稳健 minmax
+                    return ((x - minv) / (maxv - minv + eps)).clamp(0, 1)
+                elif normalize == "log":
+                    return torch.log1p(x)
+                else:
+                    return x
+            # 分层归一，避免层间统计差异导致偏置
+            x_out = torch.zeros_like(x)
+            levels = self.get_level.view(-1)  # [N]
+            for lvl in torch.unique(levels):
+                m = (levels == lvl)
+                if m.any():
+                    xv = x[m]
+                    if normalize == "minmax":
+                        minv, maxv = torch.quantile(xv, 0.0), torch.quantile(xv, 0.999)
+                        x_out[m] = ((xv - minv) / (maxv - minv + eps)).clamp(0, 1)
+                    elif normalize == "log":
+                        x_out[m] = torch.log1p(xv)
+                    else:
+                        x_out[m] = xv
+            return x_out
+
+        grad_imp = norm_by_level(grad_mean)
+        opa_imp = norm_by_level(opa)
+        vis_imp = norm_by_level(vis)
+
+        if metric == "grad":
+            return grad_imp
+        elif metric == "opacity":
+            return opa_imp
+        elif metric == "visits":
+            return vis_imp
+        else:
+            w_grad, w_opa, w_vis = weights
+            return w_grad * grad_imp + w_opa * opa_imp + w_vis * vis_imp
+
+    @torch.no_grad()
+    def prune_by_importance(
+        self,
+        metric: str = "composite",
+        weights: tuple = (1.0, 0.5, 0.5),
+        threshold: float = None,                  # 绝对阈值（在归一化后空间）
+        percentile: float = 0.10,                 # 排名式：保留 top-(1-percentile)
+        per_level: bool = True,                   # 分层进行阈值/排名
+        min_keep_per_level: int = 64,             # 每层至少保留
+        protect_first_levels: int = 1,            # 保护最粗的若干层
+        logger=None
+    ) -> dict:
+        """
+        基于重要性指标剪枝 anchor；会：
+          - 形成 keep_mask
+          - 调用 _prune_anchor_optimizer 同步优化器状态
+          - 裁剪所有 per-anchor 张量
+          - 保持/重建统计量张量的尺寸与已有值
+        返回：统计信息 dict
+        """
+        N = self.get_anchor.shape[0]
+        levels = self.get_level.view(-1)  # [N]
+        importance = self.compute_importance(metric, weights, per_level=per_level)  # [N]
+
+        keep_mask = torch.zeros(N, dtype=torch.bool, device="cuda")
+
+        unique_lvls = torch.unique(levels)
+        protected_lvls = unique_lvls[:protect_first_levels] if protect_first_levels > 0 else torch.tensor([], device="cuda", dtype=unique_lvls.dtype)
+
+        # 分层选取
+        for lvl in unique_lvls:
+            lvl_mask = (levels == lvl)
+            idx = torch.nonzero(lvl_mask, as_tuple=False).view(-1)
+            if idx.numel() == 0:
+                continue
+
+            lvl_imp = importance[idx]
+
+            # 保护 coarse levels（全部保留）
+            if (protected_lvls == lvl).any():
+                keep_mask[idx] = True
+                continue
+
+            if percentile is not None and 0.0 < percentile < 1.0:
+                k = max(min_keep_per_level, int(idx.numel() * (1.0 - percentile)))
+                k = min(k, idx.numel())
+                topk = torch.topk(lvl_imp, k=k, largest=True).indices
+                keep_idx = idx[topk]
+                keep_mask[keep_idx] = True
+            else:
+                # 阈值式（importance 已归一化）
+                thr = 0.0 if threshold is None else float(threshold)
+                lvl_keep = idx[lvl_imp >= thr]
+                if lvl_keep.numel() < min_keep_per_level:
+                    # 回退到 topk 保证覆盖
+                    k = min(min_keep_per_level, idx.numel())
+                    topk = torch.topk(lvl_imp, k=k, largest=True).indices
+                    lvl_keep = idx[topk]
+                keep_mask[lvl_keep] = True
+
+        removed = (~keep_mask).sum().item()
+        kept = keep_mask.sum().item()
+        if logger is not None:
+            logger.info(f"[Prune] anchors kept: {kept} / {N} (remove {removed}) with metric={metric}")
+
+        # 实际执行裁剪
+        self._apply_keep_mask_and_prune(keep_mask)
+
+        # 返回统计
+        kept_by_level = {int(l.item()): int((keep_mask & (levels == l)).sum().item()) for l in unique_lvls}
+        return {
+            "kept": kept,
+            "removed": removed,
+            "kept_by_level": kept_by_level
+        }
+
+    @torch.no_grad()
+    def _apply_keep_mask_and_prune(self, keep_mask: torch.Tensor):
+        """
+        对所有 per-anchor 参数、buffer、统计量进行一致裁剪；
+        同步优化器状态；并保持 offset 维度一致性。
+        """
+        assert keep_mask.dtype == torch.bool and keep_mask.shape[0] == self.get_anchor.shape[0]
+        N = keep_mask.shape[0]
+        n_off = self.n_offsets
+
+        # 先同步优化器（已有工具函数）
+        self._prune_anchor_optimizer(keep_mask)
+
+        # 张量裁剪（per-anchor）
+        self._anchor = nn.Parameter(self._anchor[keep_mask].detach().requires_grad_(True))
+        self._level = self._level[keep_mask]
+        self._extra_level = self._extra_level[keep_mask]
+        self._anchor_feat = nn.Parameter(self._anchor_feat[keep_mask].detach().requires_grad_(True))
+        self._scaling = nn.Parameter(self._scaling[keep_mask].detach().requires_grad_(True))
+        self._rotation = nn.Parameter(self._rotation[keep_mask].detach().requires_grad_(True))
+        self._opacity = nn.Parameter(self._opacity[keep_mask].detach().requires_grad_(False))
+        if hasattr(self, "_anchor_mask") and self._anchor_mask is not None and self._anchor_mask.numel() == N:
+            self._anchor_mask = self._anchor_mask[keep_mask]
+
+        # offset: [N, n_offsets, 3] 或内部存储的等价形状
+        off = self._offset
+        if off.dim() == 3 and off.shape[0] == N:
+            self._offset = nn.Parameter(off[keep_mask].detach().requires_grad_(True))
+        else:
+            # 回退：按第一维 anchor 维度裁剪
+            shape = off.shape
+            anchor_dim = shape[0]
+            assert anchor_dim == N, "Unexpected _offset shape for pruning."
+            self._offset = nn.Parameter(off[keep_mask].detach().requires_grad_(True))
+
+        # 统计量裁剪并保持历史（不清零）
+        if hasattr(self, "opacity_accum") and self.opacity_accum.shape[0] == N:
+            self.opacity_accum = self.opacity_accum[keep_mask]
+        if hasattr(self, "anchor_demon") and self.anchor_demon.shape[0] == N:
+            self.anchor_demon = self.anchor_demon[keep_mask]
+        if hasattr(self, "offset_gradient_accum") and self.offset_gradient_accum.shape[0] == N * n_off:
+            self.offset_gradient_accum = self.offset_gradient_accum.view(N, n_off, 1)[keep_mask].reshape(-1, 1)
+        if hasattr(self, "offset_denom") and self.offset_denom.shape[0] == N * n_off:
+            self.offset_denom = self.offset_denom.view(N, n_off, 1)[keep_mask].reshape(-1, 1)
+
+        torch.cuda.empty_cache()
+
+    @torch.no_grad()
+    def reset_pruning_accumulators(self):
+        """
+        可选：剪枝后重置统计量，避免旧统计扰动后续迭代（推荐在大幅剪枝后使用）。
+        """
+        N = self.get_anchor.shape[0]
+        n_off = self.n_offsets
+        self.opacity_accum = torch.zeros((N, 1), device="cuda")
+        self.anchor_demon = torch.zeros((N, 1), device="cuda")
+        self.offset_gradient_accum = torch.zeros((N * n_off, 1), device="cuda")
+        self.offset_denom = torch.zeros((N * n_off, 1), device="cuda")
 
     def save_mlp_checkpoints(self, path, mode = 'split'):#split or unite
         mkdir_p(os.path.dirname(path))

@@ -99,6 +99,9 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
+    # 记录 densification 的原始开关，供剪枝后短期微调窗口恢复
+    opt.update_anchor_backup = getattr(opt, "update_anchor", False)
+    opt._prune_refine_budget = 0
     for iteration in range(first_iter, opt.iterations + 1):        
         # network gui not available in octree-gs yet
         if network_gui.conn == None:
@@ -139,7 +142,15 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         
         gaussians.set_anchor_mask(viewpoint_cam.camera_center, iteration, viewpoint_cam.resolution_scale)
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
-        retain_grad = (iteration < opt.update_until and iteration >= 0)
+        # 原逻辑（仅在 iteration < opt.update_until 时统计）
+        # retain_grad = (iteration < opt.update_until and iteration >= 0)
+
+        # 建议修改为：剪枝统计期也开启 retain_grad
+        retain_grad = (
+                (iteration < opt.update_until and iteration >= 0)
+                or (getattr(opt, "enable_pruning", False)
+                    and iteration <= getattr(opt, "prune_until", opt.iterations))
+        )
         render_pkg = render(viewpoint_cam, gaussians, pipe, background, visible_mask=voxel_visible_mask, retain_grad=retain_grad)
         
         image, viewspace_point_tensor, visibility_filter, offset_selection_mask, radii, scaling, opacity = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["selection_mask"], render_pkg["radii"], render_pkg["scaling"], render_pkg["neural_opacity"]
@@ -174,33 +185,71 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
             
-            # densification
+            # Densification (keep original gating)
             if iteration < opt.update_until and iteration > opt.start_stat:
-                # add statis
-                gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
-                
-                # densification
                 if opt.update_anchor and iteration > opt.update_from and iteration % opt.update_interval == 0:
                     gaussians.adjust_anchor(
                         iteration=iteration,
-                        check_interval=opt.update_interval, 
+                        check_interval=opt.update_interval,
                         success_threshold=opt.success_threshold,
-                        grad_threshold=opt.densify_grad_threshold, 
+                        grad_threshold=opt.densify_grad_threshold,
                         update_ratio=dataset.update_ratio,
                         extra_ratio=dataset.extra_ratio,
                         extra_up=dataset.extra_up,
                         min_opacity=opt.min_opacity
                     )
-            elif iteration == opt.update_until:
-                del gaussians.opacity_accum
-                del gaussians.offset_gradient_accum
-                del gaussians.offset_denom
-                torch.cuda.empty_cache()
-                    
+
+            # ========= Iterative pruning + short-term refinement =========
+            if getattr(opt, "enable_pruning", False) \
+               and iteration >= getattr(opt, "prune_from", 0) \
+               and iteration % getattr(opt, "prune_interval", 1000000) == 0 \
+               and iteration <= getattr(opt, "prune_until", opt.iterations):
+
+                prune_stats = gaussians.prune_by_importance(
+                    metric=getattr(opt, "prune_metric", "composite"),
+                    weights=(getattr(opt, "prune_grad_weight", 1.0),
+                             getattr(opt, "prune_opacity_weight", 0.5),
+                             getattr(opt, "prune_visit_weight", 0.5)),
+                    threshold=getattr(opt, "prune_threshold", None),
+                    percentile=getattr(opt, "prune_percentile", 0.10),
+                    per_level=getattr(opt, "prune_per_level", True),
+                    min_keep_per_level=getattr(opt, "prune_min_keep_per_level", 64),
+                    protect_first_levels=getattr(opt, "prune_protect_first_levels", 1),
+                    logger=logger
+                )
+
+                # Optional: reset accumulators after pruning
+                if getattr(opt, "reset_stats_after_prune", False):
+                    gaussians.reset_pruning_accumulators()
+
+                # Short-term refinement: pause densification for K steps
+                setattr(opt, "_prune_refine_budget", getattr(opt, "prune_refine_steps", 0))
+
+            # Suppress densification during refinement window
+            if getattr(opt, "_prune_refine_budget", 0) > 0:
+                opt.update_anchor = False
+                opt._prune_refine_budget -= 1
+            else:
+                opt.update_anchor = getattr(opt, "update_anchor_backup", opt.update_anchor)
+
+            # Conditional cleanup of stats at update_until
+            if iteration == opt.update_until:
+                if (not getattr(opt, "enable_pruning", False)) or \
+                   (iteration >= getattr(opt, "prune_until", opt.update_until)):
+                    if hasattr(gaussians, "opacity_accum"):
+                        del gaussians.opacity_accum
+                    if hasattr(gaussians, "offset_gradient_accum"):
+                        del gaussians.offset_gradient_accum
+                    if hasattr(gaussians, "offset_denom"):
+                        del gaussians.offset_denom
+                    torch.cuda.empty_cache()
+
             # Optimizer step
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+
+            # Checkpointing
             if (iteration in checkpoint_iterations):
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
