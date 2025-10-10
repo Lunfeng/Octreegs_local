@@ -200,9 +200,14 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                     )
 
             # ========= Iterative pruning + short-term refinement =========
+            # A. Compute effective prune start and use aligned trigger
+            prune_margin = getattr(opt, "prune_delay", 2000)
+            prune_from_eff = max(getattr(opt, "prune_from", 0), opt.update_until + prune_margin)
+            prune_warmup = getattr(opt, "prune_warmup", 500)
+            
             if getattr(opt, "enable_pruning", False) \
-               and iteration >= getattr(opt, "prune_from", 0) \
-               and iteration % getattr(opt, "prune_interval", 1000000) == 0 \
+               and iteration >= prune_from_eff + prune_warmup \
+               and (iteration - prune_from_eff) % getattr(opt, "prune_interval", 1000000) == 0 \
                and iteration <= getattr(opt, "prune_until", opt.iterations):
 
                 prune_stats = gaussians.prune_by_importance(
@@ -224,6 +229,9 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
 
                 # Short-term refinement: pause densification for K steps
                 setattr(opt, "_prune_refine_budget", getattr(opt, "prune_refine_steps", 0))
+                
+                # B. Set post-prune regrow budget
+                opt._prune_regrow_budget = getattr(opt, "postprune_regrow_steps", 800)
 
             # Suppress densification during refinement window
             if getattr(opt, "_prune_refine_budget", 0) > 0:
@@ -231,6 +239,20 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 opt._prune_refine_budget -= 1
             else:
                 opt.update_anchor = getattr(opt, "update_anchor_backup", opt.update_anchor)
+
+            # B. Post-prune regrow window (runs even after update_until)
+            if getattr(opt, "_prune_regrow_budget", 0) > 0:
+                gaussians.adjust_anchor(
+                    iteration=iteration,
+                    check_interval=max(1, getattr(opt, "update_interval", 100) // 2),
+                    success_threshold=getattr(opt, "success_threshold", 0.8),
+                    grad_threshold=getattr(opt, "_temp_grad_threshold", getattr(opt, "densify_grad_threshold", 0.0002) * 0.7),
+                    update_ratio=getattr(dataset, "update_ratio", 0.5),
+                    extra_ratio=getattr(dataset, "extra_ratio", 0.25),
+                    extra_up=getattr(opt, "_temp_extra_up", getattr(dataset, "extra_up", 0.01) * 1.5),
+                    min_opacity=getattr(opt, "min_opacity", 0.005)
+                )
+                opt._prune_regrow_budget -= 1
 
             # Conditional cleanup of stats at update_until
             if iteration == opt.update_until:
