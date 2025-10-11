@@ -623,9 +623,11 @@ if __name__ == "__main__":
     safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    network_gui.init(args.ip, args.port)
+    # network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    
+
+    #record start time
+    start_time = time.time()
     # training
     training(lp.extract(args), op.extract(args), pp.extract(args), dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb, logger)
     if args.warmup:
@@ -634,7 +636,7 @@ if __name__ == "__main__":
         training(lp.extract(args), op.extract(args), pp.extract(args), dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb=wandb, logger=logger, ply_path=new_ply_path)
 
     # All done
-    logger.info("\nTraining complete.")
+    logger.info(f"\nTraining complete. Total time: {time.time() - start_time:.2f} seconds.")
 
     # rendering
     logger.info(f'\nStarting Rendering~')
