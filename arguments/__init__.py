@@ -13,11 +13,13 @@ from argparse import ArgumentParser, Namespace
 import sys
 import os
 
+
 class GroupParams:
     pass
 
+
 class ParamGroup:
-    def __init__(self, parser: ArgumentParser, name : str, fill_none = False):
+    def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
         for key, value in vars(self).items():
             shorthand = False
@@ -25,7 +27,7 @@ class ParamGroup:
                 shorthand = True
                 key = key[1:]
             t = type(value)
-            value = value if not fill_none else None 
+            value = value if not fill_none else None
             if shorthand:
                 if t == bool:
                     group.add_argument("--" + key, ("-" + key[0:1]), default=value, action="store_true")
@@ -44,7 +46,8 @@ class ParamGroup:
                 setattr(group, arg[0], arg[1])
         return group
 
-class ModelParams(ParamGroup): 
+
+class ModelParams(ParamGroup):
     def __init__(self, parser, sentinel=False):
         self.feat_dim = 32
         self.n_offsets = 10
@@ -62,28 +65,28 @@ class ModelParams(ParamGroup):
         self.data_device = "cuda"
         self.eval = False
         self.ds = 1
-        self.ratio = 1 # sampling the input point cloud
-        self.undistorted = False 
+        self.ratio = 1  # sampling the input point cloud
+        self.undistorted = False
 
         self.appearance_dim = 32
         self.add_opacity_dist = False
         self.add_cov_dist = False
         self.add_color_dist = False
         self.add_level = False
-        
+
         self.extend = 1.1
         self.dist2level = 'round'
-        self.base_layer = -1 # -1(adaptive) or 10 (default) or 0 ~ 
-        self.visible_threshold = 0.0 # -1(adaptive) or 0.0 ~ 1.0
+        self.base_layer = -1  # -1(adaptive) or 10 (default) or 0 ~
+        self.visible_threshold = 0.0  # -1(adaptive) or 0.0 ~ 1.0
         self.update_ratio = 0.2
 
         self.progressive = False
-        self.dist_ratio = 0.999 # 0.99/0.999
-        self.levels = -1 # -1(adaptive) or 0 ~ 
-        self.init_level = -1 # -1(adaptive) or 0 ~ levels-1
+        self.dist_ratio = 0.999  # 0.99/0.999
+        self.levels = -1  # -1(adaptive) or 0 ~
+        self.init_level = -1  # -1(adaptive) or 0 ~ levels-1
         self.extra_ratio = 0.25
         self.extra_up = 0.01
-        
+
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -91,11 +94,13 @@ class ModelParams(ParamGroup):
         g.source_path = os.path.abspath(g.source_path)
         return g
 
+
 class PipelineParams(ParamGroup):
     def __init__(self, parser):
         self.compute_cov3D_python = False
         self.debug = False
         super().__init__(parser, "Pipeline Parameters")
+
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
@@ -104,7 +109,7 @@ class OptimizationParams(ParamGroup):
         self.position_lr_final = 0.0
         self.position_lr_delay_mult = 0.01
         self.position_lr_max_steps = self.iterations
-        
+
         self.offset_lr_init = 0.01
         self.offset_lr_final = 0.0001
         self.offset_lr_delay_mult = 0.01
@@ -114,9 +119,9 @@ class OptimizationParams(ParamGroup):
         self.opacity_lr = 0.02
         self.scaling_lr = 0.007
         self.rotation_lr = 0.002
-        
+
         self.mlp_opacity_lr_init = 0.002
-        self.mlp_opacity_lr_final = 0.00002  
+        self.mlp_opacity_lr_final = 0.00002
         self.mlp_opacity_lr_delay_mult = 0.01
         self.mlp_opacity_lr_max_steps = self.iterations
 
@@ -124,7 +129,7 @@ class OptimizationParams(ParamGroup):
         self.mlp_cov_lr_final = 0.004
         self.mlp_cov_lr_delay_mult = 0.01
         self.mlp_cov_lr_max_steps = self.iterations
-        
+
         self.mlp_color_lr_init = 0.008
         self.mlp_color_lr_final = 0.00005
         self.mlp_color_lr_delay_mult = 0.01
@@ -134,7 +139,7 @@ class OptimizationParams(ParamGroup):
         self.mlp_color_lr_final = 0.00005
         self.mlp_color_lr_delay_mult = 0.01
         self.mlp_color_lr_max_steps = self.iterations
-        
+
         self.mlp_featurebank_lr_init = 0.01
         self.mlp_featurebank_lr_final = 0.00001
         self.mlp_featurebank_lr_delay_mult = 0.01
@@ -147,7 +152,7 @@ class OptimizationParams(ParamGroup):
 
         self.percent_dense = 0.01
         self.lambda_dssim = 0.2
-        
+
         # for anchor densification
         self.start_stat = 500
         self.update_from = 1500
@@ -161,29 +166,10 @@ class OptimizationParams(ParamGroup):
         self.success_threshold = 0.8
         self.densify_grad_threshold = 0.0002
 
-        self.enable_pruning = False
-        self.prune_metric = "composite"       # "grad" | "opacity" | "visits" | "composite"
-        self.prune_grad_weight = 1.0
-        self.prune_opacity_weight = 0.5
-        self.prune_visit_weight = 0.5
-
-        self.prune_from = 10000               # 启动剪枝的最早迭代
-        self.prune_interval = 2000            # 剪枝间隔
-        self.prune_until = 30000              # 停止剪枝的最晚迭代
-
-        self.prune_percentile = 0.10          # 排名式保留 top-(1 - percentile)，与 threshold 二选一
-        self.prune_threshold = None           # 若设置，则使用阈值式（在归一化后空间）
-
-        self.prune_per_level = True           # 分层评估/筛选，避免层间偏置
-        self.prune_min_keep_per_level = 64    # 每层至少保留
-        self.prune_protect_first_levels = 1   # 保护最粗若干层，通常 1 即可
-
-        self.prune_refine_steps = 500         # 剪枝后短期微调步数（用抑制 densification 的方式实现）
-        self.reset_stats_after_prune = False  # 若启用，每次剪枝后清零统计重新累计
-
         super().__init__(parser, "Optimization Parameters")
 
-def get_combined_args(parser : ArgumentParser):
+
+def get_combined_args(parser: ArgumentParser):
     cmdlne_string = sys.argv[1:]
     cfgfile_string = "Namespace()"
     args_cmdline = parser.parse_args(cmdlne_string)
@@ -200,7 +186,7 @@ def get_combined_args(parser : ArgumentParser):
     args_cfgfile = eval(cfgfile_string)
 
     merged_dict = vars(args_cfgfile).copy()
-    for k,v in vars(args_cmdline).items():
+    for k, v in vars(args_cmdline).items():
         if v != None:
             merged_dict[k] = v
     return Namespace(**merged_dict)
