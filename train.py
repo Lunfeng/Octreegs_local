@@ -42,6 +42,7 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from utils.prune_rewind import PruneAndRewindManager
 
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
@@ -87,6 +88,17 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
     )
     scene = Scene(dataset, gaussians, ply_path=ply_path, shuffle=False, logger=logger, resolution_scales=dataset.resolution_scales)
     gaussians.training_setup(opt)
+    prune_rewind_manager = PruneAndRewindManager(
+        gaussians,
+        buffer_budget_mb=256,
+        delta_psnr=0.15,
+        delta_lpips=0.003,
+        loss_window=300,
+        loss_delta_scale=1.5,
+        beta=0.1,
+        cooldown_steps=500,
+        prune_decay=0.8,
+    )
     gaussians.set_coarse_interval(opt.coarse_iter, opt.coarse_factor)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
@@ -169,7 +181,7 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 progress_bar.close()
 
             # Log and save
-            training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger)
+            metrics_result = training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger, lpips_fn=lpips_fn)
             if (iteration in saving_iterations):
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -181,6 +193,9 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
 
                 # densification
                 if opt.update_anchor and iteration > opt.update_from and iteration % opt.update_interval == 0:
+                    dynamic_min_opacity = opt.min_opacity
+                    if prune_rewind_manager is not None:
+                        dynamic_min_opacity *= prune_rewind_manager.min_opacity_scale
                     gaussians.adjust_anchor(
                         iteration=iteration,
                         check_interval=opt.update_interval,
@@ -189,13 +204,18 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                         update_ratio=dataset.update_ratio,
                         extra_ratio=dataset.extra_ratio,
                         extra_up=dataset.extra_up,
-                        min_opacity=opt.min_opacity
+                        min_opacity=dynamic_min_opacity,
+                        prune_rewind_manager=prune_rewind_manager,
+                        loss_baseline=loss.item(),
                     )
             elif iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
                 del gaussians.offset_denom
                 torch.cuda.empty_cache()
+
+            if prune_rewind_manager is not None:
+                prune_rewind_manager.update_iteration(iteration, loss.item(), ema_loss_for_log, metrics_result)
 
             # Optimizer step
             if iteration < opt.iterations:
@@ -227,7 +247,8 @@ def prepare_output_and_logger(args):
         print("Tensorboard not available: not logging progress")
     return tb_writer
 
-def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None):
+def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, wandb=None, logger=None, lpips_fn=None):
+    metrics_result = {}
     if tb_writer:
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/l1_loss', Ll1.item(), iteration)
         tb_writer.add_scalar(f'{dataset_name}/train_loss_patches/total_loss', loss.item(), iteration)
@@ -249,6 +270,7 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
                 psnr_test = 0.0
+                lpips_test = 0.0
 
                 if wandb is not None:
                     gt_image_list = []
@@ -275,11 +297,20 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
 
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
+                    if lpips_fn is not None:
+                        lpips_input_render = image * 2.0 - 1.0
+                        lpips_input_gt = gt_image * 2.0 - 1.0
+                        lpips_val = lpips_fn(lpips_input_render, lpips_input_gt).mean().double()
+                        lpips_test += lpips_val
 
 
 
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])
+                if lpips_fn is not None and len(config['cameras']) > 0:
+                    lpips_test = (lpips_test / len(config['cameras'])).item()
+                else:
+                    lpips_test = None
                 logger.info("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
 
 
@@ -287,7 +318,15 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
                     tb_writer.add_scalar(f'{dataset_name}/'+config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
                     tb_writer.add_scalar(f'{dataset_name}/'+config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
                 if wandb is not None:
-                    wandb.log({f"{config['name']}_loss_viewpoint_l1_loss":l1_test, f"{config['name']}_PSNR":psnr_test})
+                    log_dict = {f"{config['name']}_loss_viewpoint_l1_loss":l1_test, f"{config['name']}_PSNR":psnr_test}
+                    if lpips_test is not None:
+                        log_dict[f"{config['name']}_LPIPS"] = lpips_test
+                    wandb.log(log_dict)
+
+                if config['name'] == 'test':
+                    metrics_result['psnr'] = psnr_test.item()
+                    if lpips_test is not None:
+                        metrics_result['lpips'] = lpips_test
 
         if tb_writer:
             # tb_writer.add_histogram(f'{dataset_name}/'+"scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
@@ -295,6 +334,8 @@ def training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, elap
         torch.cuda.empty_cache()
 
         scene.gaussians.train()
+
+    return metrics_result
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")

@@ -26,6 +26,7 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 from scene.embedding import Embedding
 from einops import repeat
 import math
+from utils.prune_rewind import PrunedSubtreePack
 
 class GaussianModel:
 
@@ -96,6 +97,9 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+
+        self._anchor_uuid = torch.empty(0, dtype=torch.long)
+        self._uuid_counter = 0
 
         self.offset_gradient_accum = torch.empty(0)
         self.offset_denom = torch.empty(0)
@@ -187,6 +191,11 @@ class GaussianModel:
         self.training_setup(training_args)
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
+        self._anchor_uuid = torch.arange(self._anchor.shape[0], dtype=torch.long, device="cuda")
+        if self._anchor_uuid.numel() > 0:
+            self._uuid_counter = int(self._anchor_uuid.max().item()) + 1
+        else:
+            self._uuid_counter = 0
 
     @property
     def get_appearance(self):
@@ -203,6 +212,10 @@ class GaussianModel:
     @property
     def get_anchor(self):
         return self._anchor
+
+    @property
+    def get_anchor_uuid(self):
+        return self._anchor_uuid
 
     @property
     def get_level(self):
@@ -348,6 +361,11 @@ class GaussianModel:
         self._level = self._level.unsqueeze(dim=1)
         self._extra_level = torch.zeros(self._anchor.shape[0], dtype=torch.float, device="cuda")
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self._anchor_uuid = torch.arange(self._anchor.shape[0], dtype=torch.long, device="cuda")
+        if self._anchor_uuid.numel() > 0:
+            self._uuid_counter = int(self._anchor_uuid.max().item()) + 1
+        else:
+            self._uuid_counter = 0
 
     def map_to_int_level(self, pred_level, cur_level):
         if self.dist2level=='floor':
@@ -543,7 +561,7 @@ class GaussianModel:
                         np.asarray(plydata.elements[0]["y"]),
                         np.asarray(plydata.elements[0]["z"])),  axis=1).astype(np.float32)
 
-        levels = np.asarray(plydata.elements[0]["level"])[... ,np.newaxis].astype(np.int)
+        levels = np.asarray(plydata.elements[0]["level"])[..., np.newaxis].astype(int)
         extra_levels = np.asarray(plydata.elements[0]["extra_level"])[... ,np.newaxis].astype(np.float32)
         self.voxel_size = torch.tensor(plydata.elements[0]["info"][0]).float()
         self.standard_dist = torch.tensor(plydata.elements[0]["info"][1]).float()
@@ -700,6 +718,76 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
         self._level = self._level[valid_points_mask]
         self._extra_level = self._extra_level[valid_points_mask]
+        self._anchor_uuid = self._anchor_uuid[valid_points_mask]
+        self._anchor_mask = self._anchor_mask[valid_points_mask]
+
+    def restore_pruned_pack(self, pack: PrunedSubtreePack):
+        if pack is None:
+            return
+        optimizable_tensors = {}
+        for group in self.optimizer.param_groups:
+            name = group.get("name", "")
+            if name not in pack.params:
+                continue
+            extension_tensor = pack.params[name].to(group["params"][0].device, dtype=group["params"][0].dtype)
+            stored_state = self.optimizer.state.get(group["params"][0], None)
+            if stored_state is not None:
+                exp_avg = stored_state.get("exp_avg")
+                exp_avg_sq = stored_state.get("exp_avg_sq")
+                if exp_avg is not None and exp_avg_sq is not None:
+                    if pack.opt_state and name in pack.opt_state:
+                        state_pack = pack.opt_state[name]
+                        exp_avg_extension = state_pack["exp_avg"].to(exp_avg.device, dtype=exp_avg.dtype)
+                        exp_avg_sq_extension = state_pack["exp_avg_sq"].to(exp_avg_sq.device, dtype=exp_avg_sq.dtype)
+                    else:
+                        exp_avg_extension = torch.zeros_like(extension_tensor, device=exp_avg.device)
+                        exp_avg_sq_extension = torch.zeros_like(extension_tensor, device=exp_avg_sq.device)
+                    stored_state["exp_avg"] = torch.cat((exp_avg, exp_avg_extension), dim=0)
+                    stored_state["exp_avg_sq"] = torch.cat((exp_avg_sq, exp_avg_sq_extension), dim=0)
+                del self.optimizer.state[group["params"][0]]
+                new_param = torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(True)
+                new_param = nn.Parameter(new_param)
+                if stored_state is not None:
+                    self.optimizer.state[new_param] = stored_state
+                group["params"][0] = new_param
+            else:
+                new_param = torch.cat((group["params"][0], extension_tensor), dim=0).requires_grad_(True)
+                group["params"][0] = nn.Parameter(new_param)
+            optimizable_tensors[name] = group["params"][0]
+
+        if "anchor" in optimizable_tensors:
+            self._anchor = optimizable_tensors["anchor"]
+        if "offset" in optimizable_tensors:
+            self._offset = optimizable_tensors["offset"]
+        if "anchor_feat" in optimizable_tensors:
+            self._anchor_feat = optimizable_tensors["anchor_feat"]
+        if "opacity" in optimizable_tensors:
+            self._opacity = optimizable_tensors["opacity"]
+        if "scaling" in optimizable_tensors:
+            self._scaling = optimizable_tensors["scaling"]
+        if "rotation" in optimizable_tensors:
+            self._rotation = optimizable_tensors["rotation"]
+
+        self._level = torch.cat([self._level, pack.topo_info["level"].to(self._level.device, dtype=self._level.dtype)], dim=0)
+        self._extra_level = torch.cat([self._extra_level, pack.topo_info["extra_level"].to(self._extra_level.device, dtype=self._extra_level.dtype)], dim=0)
+
+        opacity_accum = pack.stats["opacity_accum"].to(self.opacity_accum.device, dtype=self.opacity_accum.dtype)
+        anchor_demon = pack.stats["anchor_demon"].to(self.anchor_demon.device, dtype=self.anchor_demon.dtype)
+        self.opacity_accum = torch.cat([self.opacity_accum, opacity_accum], dim=0)
+        self.anchor_demon = torch.cat([self.anchor_demon, anchor_demon], dim=0)
+
+        offset_gradient = pack.stats["offset_gradient_accum"].to(self.offset_gradient_accum.device, dtype=self.offset_gradient_accum.dtype)
+        offset_denom = pack.stats["offset_denom"].to(self.offset_denom.device, dtype=self.offset_denom.dtype)
+        self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, offset_gradient], dim=0)
+        self.offset_denom = torch.cat([self.offset_denom, offset_denom], dim=0)
+
+        new_mask = torch.ones(pack.node_ids.shape[0], dtype=torch.bool, device=self._anchor_mask.device)
+        self._anchor_mask = torch.cat([self._anchor_mask, new_mask], dim=0)
+
+        new_uuid = pack.topo_info["uuid"].to(self._anchor_uuid.device, dtype=self._anchor_uuid.dtype)
+        self._anchor_uuid = torch.cat([self._anchor_uuid, new_uuid], dim=0)
+        if new_uuid.numel() > 0:
+            self._uuid_counter = max(self._uuid_counter, int(new_uuid.max().item()) + 1)
 
     def get_remove_duplicates(self, grid_coords, selected_grid_coords_unique, use_chunk = True):
         if use_chunk:
@@ -848,8 +936,12 @@ class GaussianModel:
                 self._opacity = optimizable_tensors["opacity"]
                 self._level = torch.cat([self._level, new_level], dim=0)
                 self._extra_level = torch.cat([self._extra_level, new_extra_level], dim=0)
+                new_ids = torch.arange(self._uuid_counter, self._uuid_counter + new_anchor.shape[0], dtype=torch.long, device="cuda")
+                self._uuid_counter += new_anchor.shape[0]
+                self._anchor_uuid = torch.cat([self._anchor_uuid, new_ids], dim=0)
+                self._anchor_mask = torch.cat([self._anchor_mask, torch.ones_like(new_ids, dtype=torch.bool, device="cuda")], dim=0)
 
-    def adjust_anchor(self, iteration, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, update_ratio=0.5, extra_ratio=4.0, extra_up=0.25, min_opacity=0.005):
+    def adjust_anchor(self, iteration, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, update_ratio=0.5, extra_ratio=4.0, extra_up=0.25, min_opacity=0.005, prune_rewind_manager=None, loss_baseline=None):
         # # adding anchors
         grads = self.offset_gradient_accum / self.offset_denom # [N*k, 1]
         grads[grads.isnan()] = 0.0
@@ -876,6 +968,13 @@ class GaussianModel:
         anchors_mask = (self.anchor_demon > check_interval*success_threshold).squeeze(dim=1) # [N, 1]
         prune_mask = torch.logical_and(prune_mask, anchors_mask) # [N]
 
+        if prune_rewind_manager is not None:
+            prune_mask = prune_rewind_manager.apply_prune_policy(self, prune_mask, iteration)
+
+        pack = None
+        if prune_rewind_manager is not None and torch.any(prune_mask):
+            pack = prune_rewind_manager.snapshot(self, prune_mask)
+
         # update offset_denom
         offset_denom = self.offset_denom.view([-1, self.n_offsets])[~prune_mask]
         offset_denom = offset_denom.view([-1, 1])
@@ -900,8 +999,11 @@ class GaussianModel:
         del self.anchor_demon
         self.anchor_demon = temp_anchor_demon
 
-        if prune_mask.shape[0]>0:
+        if torch.any(prune_mask):
             self.prune_anchor(prune_mask)
+            if prune_rewind_manager is not None:
+                baseline = float(loss_baseline) if loss_baseline is not None else 0.0
+                prune_rewind_manager.on_prune_committed(pack, iteration, baseline)
 
     def save_mlp_checkpoints(self, path, mode = 'split'):#split or unite
         mkdir_p(os.path.dirname(path))
