@@ -1,0 +1,23 @@
+{
+  "pruning": {
+    "mask": {
+      "enabled": false,
+      "lambda_m": 0.0,
+      "temp": {
+        "init": 1.0,
+        "final": 0.4,
+        "anneal_portion": 0.6
+      },
+      "sample_trials": 10,
+      "global_interval": 1000,
+      "newborn_protect_cycles": 2,
+      "remove_rule": "all_zero",
+      "scheduler": {
+        "phase_breakpoints": [
+          0.3,
+          0.7
+        ]
+      }
+    }
+  }
+}
