@@ -42,6 +42,8 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from utils.masking import gumbel_softmax_binary, TempScheduler
+from utils.pruning import ProbabilisticPruner
 
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
@@ -53,6 +55,25 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
     print("not found tf board")
+
+def get_lambda_m(global_step: int, total_steps: int) -> float:
+    """Get mask regularization coefficient based on training progress."""
+    r = global_step / max(1, total_steps)
+    if r < 0.3:
+        return 5e-4
+    elif r < 0.7:
+        return 8e-4
+    else:
+        return 1e-3
+
+def log_mask_stats(tb_writer, step, M, p_keep, num_gaussians, lambda_m):
+    """Log masking statistics to TensorBoard."""
+    if tb_writer:
+        tb_writer.add_scalar("mask/p_keep_mean", p_keep.mean().item(), step)
+        tb_writer.add_scalar("mask/retained_ratio", M.sum().item() / float(num_gaussians), step)
+        tb_writer.add_scalar("mask/lambda_m", lambda_m, step)
+        tb_writer.add_scalar("mask/num_retained", M.sum().item(), step)
+        tb_writer.add_scalar("mask/num_total", float(num_gaussians), step)
 
 def saveRuntimeCode(dst: str) -> None:
     additionalIgnorePatterns = ['.git', '.gitignore']
@@ -91,6 +112,11 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+
+    # Initialize probabilistic pruning components
+    temp_sched = TempScheduler(t_start=1.0, t_end=0.4, total_steps=opt.iterations)
+    pruner = ProbabilisticPruner(num_gaussians=gaussians.get_anchor.shape[0], k_trials=10)
+    local_cycle_count = 0
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -137,6 +163,18 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         if (iteration - 1) == debug_from:
             pipe.debug = True
 
+        # Sample masks for probabilistic pruning
+        tau = temp_sched.value(iteration)
+        p_keep, M = gumbel_softmax_binary(
+            gaussians.get_mask_logit_keep, 
+            gaussians.get_mask_logit_drop, 
+            tau=tau, 
+            hard=True
+        )
+        
+        # Accumulate mask samples for pruning statistics
+        pruner.accumulate(M)
+        
         gaussians.set_anchor_mask(viewpoint_cam.camera_center, iteration, viewpoint_cam.resolution_scale)
         voxel_visible_mask = prefilter_voxel(viewpoint_cam, gaussians, pipe, background)
         retain_grad = (iteration < opt.update_until and iteration >= 0)
@@ -152,9 +190,19 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             scaling_reg = scaling.prod(dim=1).mean()
         else:
             scaling_reg = torch.tensor(0.0, device="cuda")
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
+        
+        # Add mask regularization loss
+        lambda_m = get_lambda_m(iteration, opt.iterations)
+        L_mask = (M.mean()) ** 2
+        
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg + lambda_m * L_mask
 
         loss.backward()
+        
+        # Clip gradients for mask logits
+        with torch.no_grad():
+            if gaussians.get_mask_logit_keep.grad is not None:
+                torch.nn.utils.clip_grad_norm_([gaussians.get_mask_logit_keep, gaussians.get_mask_logit_drop], max_norm=1.0)
 
         iter_end.record()
 
@@ -167,6 +215,10 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 progress_bar.update(10)
             if iteration == opt.iterations:
                 progress_bar.close()
+
+            # Log mask statistics
+            if iteration % 100 == 0:
+                log_mask_stats(tb_writer, iteration, M, p_keep, gaussians.get_anchor.shape[0], lambda_m)
 
             # Log and save
             training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger)
@@ -191,11 +243,34 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                         extra_up=dataset.extra_up,
                         min_opacity=opt.min_opacity
                     )
+                    
+                    # After densification, increment local cycle and check for pruning
+                    local_cycle_count += 1
+                    if local_cycle_count >= 10:
+                        # Resize pruner to match new number of gaussians
+                        pruner.resize(gaussians.get_anchor.shape[0])
+                        # Perform probabilistic pruning with protection mask
+                        del_idx = pruner.mark_and_reset(protect_mask=gaussians.newborn_protect_mask())
+                        if del_idx.shape[0] > 0:
+                            logger.info(f"\n[ITER {iteration}] Probabilistic pruning: removing {del_idx.shape[0]} gaussians")
+                            gaussians.remove_gaussians(del_idx)
+                            # Resize pruner after removal
+                            pruner.resize(gaussians.get_anchor.shape[0])
+                        local_cycle_count = 0
             elif iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
                 del gaussians.offset_denom
                 torch.cuda.empty_cache()
+            
+            # Periodic global pruning check (every 1000 iterations)
+            if iteration % 1000 == 0 and iteration > opt.start_stat:
+                pruner.resize(gaussians.get_anchor.shape[0])
+                del_idx = pruner.mark_and_reset(protect_mask=gaussians.newborn_protect_mask())
+                if del_idx.shape[0] > 0:
+                    logger.info(f"\n[ITER {iteration}] Periodic probabilistic pruning: removing {del_idx.shape[0]} gaussians")
+                    gaussians.remove_gaussians(del_idx)
+                    pruner.resize(gaussians.get_anchor.shape[0])
 
             # Optimizer step
             if iteration < opt.iterations:
