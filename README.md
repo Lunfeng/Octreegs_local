@@ -5,6 +5,9 @@
 [Kerui Ren*](https://github.com/tongji-rkr), [Lihan Jiang*](https://jianglh-whu.github.io/), [Tao Lu](https://github.com/inspirelt), [Mulin Yu](https://scholar.google.com/citations?user=w0Od3hQAAAAJ), [Linning Xu](https://eveneveno.github.io/lnxu), [Zhangkai Ni](https://eezkni.github.io/), [Bo Dai](https://daibo.info/) ✉️ <br />
 
 ## News
+
+**[NEW]** 🎈We implement **Probabilistic Pruning** with learnable binary masks for dynamic Gaussian pruning during training. See [docs/PROBABILISTIC_PRUNING.md](docs/PROBABILISTIC_PRUNING.md) for details.
+
 **[2024.09.25]** 🎈We propose **Octree-AnyGS**, a general anchor-based framework that supports explicit Gaussians (2D-GS, 3D-GS) and neural Gaussians (Scaffold-GS). Additionally, **Octree-GS** has been adapted to the aforementioned Gaussian primitives, enabling Level-of-Detail representation for large-scale scenes. This framework holds potential for application to other Gaussian-based methods, with relevant SIBR visualizations forthcoming.(https://github.com/city-super/Octree-AnyGS)
 
 **[2024.05.30]** 👀We update new mode (`depth`, `normal`, `Gaussian distribution` and `LOD Bias`) in the [viewer](https://github.com/city-super/Octree-GS/tree/main/SIBR_viewers) for Octree-GS.
@@ -34,6 +37,16 @@ class="center">
 class="center">
 </p>
 
+
+## Features
+
+- **LOD-Structured 3D Gaussians**: Hierarchical octree-based representation with Level-of-Detail decomposition
+- **Progressive Learning**: Dynamic LOD adjustment during training for consistent rendering performance
+- **Probabilistic Pruning** ✨: Learnable binary masks with Gumbel-Softmax sampling for dynamic Gaussian pruning
+  - Temperature-annealed mask sampling with straight-through estimator
+  - Statistical pruning based on multiple samples (k-trials)
+  - Protection mechanism for newly created Gaussians
+  - Configurable sparsity vs. quality trade-offs (see [docs/PROBABILISTIC_PRUNING.md](docs/PROBABILISTIC_PRUNING.md))
 
 ## Installation
 
