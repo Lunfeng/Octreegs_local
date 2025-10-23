@@ -1,0 +1,56 @@
+# Configuration for probabilistic pruning with masking
+# This file defines hyperparameters for the mask-based pruning system
+
+masking:
+  # Temperature scheduler parameters for Gumbel-Softmax
+  tau_start: 1.0
+  tau_end: 0.4
+  total_steps: 30000
+  
+  # Lambda (regularization coefficient) schedule
+  # Linear interpolation based on training progress:
+  # - [0, 30%]: lambda_m_warmup
+  # - [30%, 70%]: lambda_m_mid  
+  # - [70%, 100%]: lambda_m_late
+  lambda_m_warmup: 5.0e-4
+  lambda_m_mid: 8.0e-4
+  lambda_m_late: 1.0e-3
+  
+  # Use hard (binary) masks vs soft probabilities
+  hard: true
+  
+  # Probabilistic pruning parameters
+  k_trials: 10  # Number of samples before pruning decision
+  global_period: 1000  # Period (in iterations) for global pruning check
+  protect_cycles: 2  # Number of local cycles to protect newly created gaussians
+  
+  # Learning rate for mask parameters (relative to base_lr)
+  mask_lr_factor: 0.5
+  
+  # Gradient clipping for mask logits
+  mask_grad_clip: 1.0
+  
+  # Initial bias for new gaussians (logit space)
+  # 0.8 corresponds to ~69% probability of keeping
+  init_logit_keep: 0.8
+  init_logit_drop: 0.0
+
+# Preset configurations for different use cases
+presets:
+  quality_first:
+    tau_end: 0.6
+    lambda_m_late: 5.0e-4
+    k_trials: 12
+    protect_cycles: 3
+    
+  compress_first:
+    tau_end: 0.4
+    lambda_m_late: 1.2e-3
+    k_trials: 8
+    protect_cycles: 2
+    
+  balanced:
+    tau_end: 0.5
+    lambda_m_late: 8.0e-4
+    k_trials: 10
+    protect_cycles: 2

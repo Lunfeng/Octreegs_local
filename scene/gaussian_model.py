@@ -101,6 +101,11 @@ class GaussianModel:
         self.offset_denom = torch.empty(0)
 
         self.anchor_demon = torch.empty(0)
+        
+        # Mask logits for probabilistic pruning
+        self._mask_logit_keep = torch.empty(0)
+        self._mask_logit_drop = torch.empty(0)
+        self._protect_mask = torch.empty(0)  # Protection mask for newly created gaussians
 
         self.optimizer = None
         self.percent_dense = 0
@@ -235,6 +240,14 @@ class GaussianModel:
     @property
     def get_featurebank_mlp(self):
         return self.mlp_feature_bank
+    
+    @property
+    def get_mask_logit_keep(self):
+        return self._mask_logit_keep
+    
+    @property
+    def get_mask_logit_drop(self):
+        return self._mask_logit_drop
 
     def set_appearance(self, num_cameras):
         if self.appearance_dim > 0:
@@ -348,6 +361,13 @@ class GaussianModel:
         self._level = self._level.unsqueeze(dim=1)
         self._extra_level = torch.zeros(self._anchor.shape[0], dtype=torch.float, device="cuda")
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        
+        # Initialize mask logits (bias towards keeping)
+        mask_logit_keep = torch.ones((self.positions.shape[0], 1), dtype=torch.float, device="cuda") * 0.8
+        mask_logit_drop = torch.zeros((self.positions.shape[0], 1), dtype=torch.float, device="cuda")
+        self._mask_logit_keep = nn.Parameter(mask_logit_keep.requires_grad_(True))
+        self._mask_logit_drop = nn.Parameter(mask_logit_drop.requires_grad_(True))
+        self._protect_mask = torch.zeros(self._anchor.shape[0], dtype=torch.int32, device="cuda")
 
     def map_to_int_level(self, pred_level, cur_level):
         if self.dist2level=='floor':
@@ -422,6 +442,8 @@ class GaussianModel:
             {'params': self.mlp_opacity.parameters(), 'lr': training_args.mlp_opacity_lr_init, "name": "mlp_opacity"},
             {'params': self.mlp_cov.parameters(), 'lr': training_args.mlp_cov_lr_init, "name": "mlp_cov"},
             {'params': self.mlp_color.parameters(), 'lr': training_args.mlp_color_lr_init, "name": "mlp_color"},
+            {'params': [self._mask_logit_keep], 'lr': training_args.feature_lr * 0.5, "name": "mask_logit_keep"},
+            {'params': [self._mask_logit_drop], 'lr': training_args.feature_lr * 0.5, "name": "mask_logit_drop"},
         ]
         if self.appearance_dim > 0:
             l.append({'params': self.embedding_appearance.parameters(), 'lr': training_args.appearance_lr_init, "name": "embedding_appearance"})
@@ -698,8 +720,11 @@ class GaussianModel:
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
+        self._mask_logit_keep = optimizable_tensors["mask_logit_keep"]
+        self._mask_logit_drop = optimizable_tensors["mask_logit_drop"]
         self._level = self._level[valid_points_mask]
         self._extra_level = self._extra_level[valid_points_mask]
+        self._protect_mask = self._protect_mask[valid_points_mask]
 
     def get_remove_duplicates(self, grid_coords, selected_grid_coords_unique, use_chunk = True):
         if use_chunk:
@@ -820,6 +845,10 @@ class GaussianModel:
                 new_extra_level_ds = torch.zeros(candidate_anchor_ds.shape[0], dtype=torch.float, device='cuda')
                 new_extra_level = torch.cat([new_extra_level, new_extra_level_ds])
 
+                # Initialize mask logits for new anchors (bias towards keeping)
+                new_mask_logit_keep = torch.ones((new_anchor.shape[0], 1), dtype=torch.float, device="cuda") * 0.8
+                new_mask_logit_drop = torch.zeros((new_anchor.shape[0], 1), dtype=torch.float, device="cuda")
+                
                 d = {
                     "anchor": new_anchor,
                     "scaling": new_scaling,
@@ -827,6 +856,8 @@ class GaussianModel:
                     "anchor_feat": new_feat,
                     "offset": new_offsets,
                     "opacity": new_opacities,
+                    "mask_logit_keep": new_mask_logit_keep,
+                    "mask_logit_drop": new_mask_logit_drop,
                 }
 
                 temp_anchor_demon = torch.cat([self.anchor_demon, torch.zeros([new_opacities.shape[0], 1], device='cuda').float()], dim=0)
@@ -846,8 +877,14 @@ class GaussianModel:
                 self._anchor_feat = optimizable_tensors["anchor_feat"]
                 self._offset = optimizable_tensors["offset"]
                 self._opacity = optimizable_tensors["opacity"]
+                self._mask_logit_keep = optimizable_tensors["mask_logit_keep"]
+                self._mask_logit_drop = optimizable_tensors["mask_logit_drop"]
                 self._level = torch.cat([self._level, new_level], dim=0)
                 self._extra_level = torch.cat([self._extra_level, new_extra_level], dim=0)
+                
+                # Update protection mask for new anchors
+                new_protect = torch.zeros(new_anchor.shape[0], dtype=torch.int32, device="cuda")
+                self._protect_mask = torch.cat([self._protect_mask, new_protect], dim=0)
 
     def adjust_anchor(self, iteration, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, update_ratio=0.5, extra_ratio=4.0, extra_up=0.25, min_opacity=0.005):
         # # adding anchors
@@ -954,3 +991,56 @@ class GaussianModel:
                 self.embedding_appearance.load_state_dict(checkpoint['appearance'])
         else:
             raise NotImplementedError
+    
+    def newborn_protect_mask(self) -> torch.Tensor:
+        """
+        Returns a [N] tensor of 0/1 indicating which gaussians are protected from pruning.
+        1 = protected (recently created), 0 = can be pruned.
+        """
+        if not hasattr(self, '_protect_mask'):
+            return torch.zeros(self.get_anchor.shape[0], dtype=torch.int32, device="cuda")
+        return self._protect_mask
+    
+    @torch.no_grad()
+    def remove_gaussians(self, idx: torch.Tensor):
+        """
+        Remove gaussians at specified indices from all per-gaussian parameters.
+        
+        Args:
+            idx: indices of gaussians to remove
+        """
+        if idx.shape[0] == 0:
+            return
+        
+        keep = torch.ones(self.get_anchor.shape[0], dtype=torch.bool, device=idx.device)
+        keep[idx] = False
+        
+        def _filter(x):
+            return x[keep]
+        
+        # Update optimizer state for pruned parameters
+        optimizable_tensors = self._prune_anchor_optimizer(keep)
+        
+        self._anchor = optimizable_tensors["anchor"]
+        self._offset = optimizable_tensors["offset"]
+        self._anchor_feat = optimizable_tensors["anchor_feat"]
+        self._opacity = optimizable_tensors["opacity"]
+        self._scaling = optimizable_tensors["scaling"]
+        self._rotation = optimizable_tensors["rotation"]
+        self._mask_logit_keep = optimizable_tensors["mask_logit_keep"]
+        self._mask_logit_drop = optimizable_tensors["mask_logit_drop"]
+        
+        # Update non-optimized tensors
+        self._level = self._level[keep]
+        self._extra_level = self._extra_level[keep]
+        self._anchor_mask = self._anchor_mask[keep]
+        
+        # Update mask tracking
+        if hasattr(self, '_protect_mask'):
+            self._protect_mask = self._protect_mask[keep]
+        
+        # Update statistics buffers
+        if hasattr(self, 'opacity_accum') and self.opacity_accum.shape[0] > 0:
+            self.opacity_accum = self.opacity_accum[keep]
+        if hasattr(self, 'anchor_demon') and self.anchor_demon.shape[0] > 0:
+            self.anchor_demon = self.anchor_demon[keep]
