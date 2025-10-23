@@ -1,5 +1,5 @@
 """Training engine integration for OctreeGS."""
 
-from .trainer import Trainer, TrainerTtfOptions
+from .trainer import Trainer
 
-__all__ = ["Trainer", "TrainerTtfOptions"]
+__all__ = ["Trainer"]

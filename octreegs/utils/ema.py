@@ -1,9 +1,4 @@
-"""Exponential moving average utilities for TTF pruning.
-
-This module implements the :class:`EmaTracker` helper which maintains a tensor
-EMA with configurable momentum. The tracker is designed to work with the
-Gaussian parameter tensors used by the pruning controller.
-"""
+"""Exponential moving average utilities for TTF pruning."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,19 +9,18 @@ import torch
 
 @dataclass
 class EmaTracker:
-    """Track an exponential moving average for a fixed-size tensor.
+    """Maintain an exponential moving average for a fixed number of items.
 
     Parameters
     ----------
     num_items:
-        Number of items that the EMA should track. The tracker internally stores
-        a 1D tensor of this length.
+        Number of tracked elements. The internal buffer has shape ``[num_items]``.
     momentum:
-        Momentum value in ``[0, 1)``. Higher values result in slower updates.
+        Smoothing factor in ``[0, 1)``. Higher values yield slower updates.
     device:
-        Optional device on which the EMA tensor should be allocated.
+        Optional ``torch.device`` used when initialising the EMA buffer.
     dtype:
-        Optional tensor dtype. Defaults to ``torch.float32``.
+        Optional ``torch.dtype`` for the buffer. Defaults to ``torch.float32``.
     """
 
     num_items: int
@@ -35,62 +29,51 @@ class EmaTracker:
     dtype: torch.dtype = torch.float32
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.momentum < 1.0:
-            raise ValueError(f"Momentum must be in [0, 1); got {self.momentum}")
+        """Allocate the EMA buffer and validate arguments."""
+
+        if not 0.0 <= float(self.momentum) < 1.0:
+            raise ValueError(f"Momentum must be in [0, 1); received {self.momentum}")
         device = self.device if self.device is not None else torch.device("cpu")
-        self._value = torch.zeros(self.num_items, dtype=self.dtype, device=device)
-        self._initialized = False
+        self._buffer = torch.zeros(self.num_items, dtype=self.dtype, device=device)
+        self._initialised = False
 
-    @property
-    def value(self) -> torch.Tensor:
-        """Return the current EMA tensor."""
+    def update(self, values: torch.Tensor) -> None:
+        """Update the EMA in-place.
 
-        return self._value
-
-    def update(self, new_value: torch.Tensor) -> torch.Tensor:
-        """Update the EMA with ``new_value``.
-
-        ``new_value`` is broadcast to the tracker size if necessary. The
-        function returns the updated EMA tensor.
+        Parameters
+        ----------
+        values:
+            Tensor of shape ``[num_items]`` whose ``dtype`` and ``device`` must match
+            the tracker buffer.
         """
 
-        if new_value.numel() != self.num_items:
+        if values.shape != self._buffer.shape:
             raise ValueError(
-                f"Expected tensor with {self.num_items} elements, got {new_value.numel()}"
+                f"Expected tensor with shape {tuple(self._buffer.shape)}, got {tuple(values.shape)}"
             )
-        if not self._initialized:
-            self._value.copy_(new_value)
-            self._initialized = True
+        if values.device != self._buffer.device or values.dtype != self._buffer.dtype:
+            raise ValueError("Input tensor must share device and dtype with EMA buffer")
+        if not self._initialised:
+            self._buffer.copy_(values)
+            self._initialised = True
         else:
-            self._value.mul_(self.momentum).add_(new_value, alpha=1.0 - self.momentum)
-        return self._value
+            self._buffer.mul_(self.momentum).add_(values, alpha=1.0 - self.momentum)
 
-    def reset(self, fill: float = 0.0) -> None:
-        """Reset the EMA to a constant value."""
+    def values(self) -> torch.Tensor:
+        """Return the EMA buffer of shape ``[num_items]``."""
 
-        self._value.fill_(fill)
-        self._initialized = False
+        return self._buffer
 
-    def state_dict(self) -> dict:
-        """Return a serialisable snapshot of the tracker."""
 
-        return {
-            "value": self._value.clone(),
-            "initialized": self._initialized,
-            "momentum": self.momentum,
-            "num_items": self.num_items,
-        }
+def _smoke_test() -> None:
+    """Minimal smoke test ensuring updates succeed."""
 
-    def load_state_dict(self, state: dict) -> None:
-        """Restore tracker state."""
+    tracker = EmaTracker(3, momentum=0.5)
+    data = torch.tensor([1.0, 2.0, 3.0])
+    tracker.update(data)
+    tracker.update(data + 1.0)
+    assert tracker.values().shape == (3,)
 
-        self.momentum = state.get("momentum", self.momentum)
-        stored = state.get("value")
-        if stored is None:
-            raise KeyError("EMA state does not contain 'value'")
-        if stored.numel() != self.num_items:
-            raise ValueError(
-                f"State tensor has {stored.numel()} elements; expected {self.num_items}"
-            )
-        self._value.copy_(stored)
-        self._initialized = bool(state.get("initialized", False))
+
+if __name__ == "__main__":
+    _smoke_test()

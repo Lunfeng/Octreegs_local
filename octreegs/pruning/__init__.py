@@ -1,5 +1,5 @@
 """Pruning utilities for OctreeGS."""
 
-from .ttf_core import TtfConfig, TtfController
+from .ttf_core import TtfController
 
-__all__ = ["TtfConfig", "TtfController"]
+__all__ = ["TtfController"]
