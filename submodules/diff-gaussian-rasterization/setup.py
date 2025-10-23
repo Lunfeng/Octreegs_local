@@ -11,8 +11,11 @@
 
 from setuptools import setup
 from torch.utils.cpp_extension import CUDAExtension, BuildExtension
+from torch._C import _GLIBCXX_USE_CXX11_ABI
 import os
 os.path.dirname(os.path.abspath(__file__))
+
+abi_flag = int(_GLIBCXX_USE_CXX11_ABI)
 
 setup(
     name="diff_gaussian_rasterization",
@@ -26,7 +29,13 @@ setup(
             "cuda_rasterizer/backward.cu",
             "rasterize_points.cu",
             "ext.cpp"],
-            extra_compile_args={"nvcc": ["-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")]})
+            extra_compile_args={
+                "cxx": [f"-D_GLIBCXX_USE_CXX11_ABI={abi_flag}"],
+                "nvcc": [
+                    f"-D_GLIBCXX_USE_CXX11_ABI={abi_flag}",
+                    "-I" + os.path.join(os.path.dirname(os.path.abspath(__file__)), "third_party/glm/")
+                ],
+            })
         ],
     cmdclass={
         'build_ext': BuildExtension
