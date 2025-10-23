@@ -14,6 +14,7 @@
 
 #include <vector>
 #include <functional>
+#include <cstdint>
 
 namespace CudaRasterizer
 {
@@ -28,29 +29,35 @@ namespace CudaRasterizer
 			float* projmatrix,
 			bool* present);
 
-		static int forward(
-			std::function<char* (size_t)> geometryBuffer,
-			std::function<char* (size_t)> binningBuffer,
-			std::function<char* (size_t)> imageBuffer,
-			const int P, int D, int M,
-			const float* background,
-			const int width, int height,
-			const float* means3D,
-			const float* shs,
-			const float* colors_precomp,
-			const float* opacities,
-			const float* scales,
-			const float scale_modifier,
-			const float* rotations,
-			const float* cov3D_precomp,
-			const float* viewmatrix,
+                static int forward(
+                        std::function<char* (size_t)> geometryBuffer,
+                        std::function<char* (size_t)> binningBuffer,
+                        std::function<char* (size_t)> imageBuffer,
+                        const int P, int D, int M,
+                        const float* background,
+                        const int width, int height,
+                        const float* means3D,
+                        const float* shs,
+                        const float* colors_precomp,
+                        const float* opacities,
+                        const uint8_t* masks,
+                        bool masks_provided,
+                        const float* mask_keep_probabilities,
+                        uint32_t mask_top_k,
+                        const float* scales,
+                        const float scale_modifier,
+                        const float* rotations,
+                        const float* cov3D_precomp,
+                        const float* viewmatrix,
 			const float* projmatrix,
 			const float* cam_pos,
-			const float tan_fovx, float tan_fovy,
-			const bool prefiltered,
-			float* out_color,
-			int* radii = nullptr,
-			bool debug = false);
+                        const float tan_fovx, float tan_fovy,
+                        const bool prefiltered,
+                        float* out_color,
+                        int* radii = nullptr,
+                        bool debug = false,
+                        float* final_trans_output = nullptr,
+                        float* mask_hit_output = nullptr);
 
 
 		static void visible_filter(

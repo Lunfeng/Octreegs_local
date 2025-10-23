@@ -106,8 +106,24 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     mask = (neural_opacity>0.0)
     mask = mask.view(-1)
 
-    # select opacity 
+    # select opacity
     opacity = neural_opacity[mask]
+
+    mask_logit_keep = None
+    mask_logit_drop = None
+    newborn_cycles = None
+    if is_training:
+        visible_keep = pc._mask_logit_keep[visible_mask]
+        visible_drop = pc._mask_logit_drop[visible_mask]
+        visible_newborn = pc.newborn_cycles_left[visible_mask]
+
+        repeated_keep = visible_keep.repeat_interleave(pc.n_offsets, dim=0)
+        repeated_drop = visible_drop.repeat_interleave(pc.n_offsets, dim=0)
+        repeated_newborn = visible_newborn.repeat_interleave(pc.n_offsets)
+
+        mask_logit_keep = repeated_keep[mask]
+        mask_logit_drop = repeated_drop[mask]
+        newborn_cycles = repeated_newborn[mask]
 
     # get offset's color
     if pc.appearance_dim > 0:
@@ -148,11 +164,22 @@ def generate_neural_gaussians(viewpoint_camera, pc : GaussianModel, visible_mask
     xyz = repeat_anchor + offsets 
 
     if is_training:
-        return xyz, color, opacity, scaling, rot, neural_opacity, mask
+        return (
+            xyz,
+            color,
+            opacity,
+            scaling,
+            rot,
+            neural_opacity,
+            mask,
+            mask_logit_keep,
+            mask_logit_drop,
+            newborn_cycles,
+        )
     else:
         return xyz, color, opacity, scaling, rot
 
-def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier=1.0, visible_mask=None, retain_grad=False, ape_code=-1):
+def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier=1.0, visible_mask=None, retain_grad=False, ape_code=-1, mask_sampler=None, mask_step=None, diagnostics=None):
     """
     Render the scene. 
     
@@ -161,8 +188,48 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
 
     is_training = pc.get_color_mlp.training
         
+    mask_bits = None
+    mask_keep_values = None
+    mask_probabilities = None
+    mask_keep_probs = None
+    mask_logit_keep = None
+    mask_logit_drop = None
+    newborn_cycles = None
+
+    diag_mask_hitmap = False
+    diag_mask_top_k = 0
+    if diagnostics:
+        diag_mask_hitmap = bool(diagnostics.get("mask_hitmap_enabled", False))
+        diag_mask_top_k = int(diagnostics.get("mask_hitmap_top_k", 0))
+
     if is_training:
-        xyz, color, opacity, scaling, rot, neural_opacity, mask = generate_neural_gaussians(viewpoint_camera, pc, visible_mask, is_training=is_training)
+        (
+            xyz,
+            color,
+            opacity,
+            scaling,
+            rot,
+            neural_opacity,
+            mask,
+            mask_logit_keep,
+            mask_logit_drop,
+            newborn_cycles,
+        ) = generate_neural_gaussians(viewpoint_camera, pc, visible_mask, is_training=is_training)
+
+        if mask_logit_keep is not None and not torch.isfinite(mask_logit_keep).all():
+            raise RuntimeError("Non-finite mask_logit_keep detected before sampling")
+        if mask_logit_drop is not None and not torch.isfinite(mask_logit_drop).all():
+            raise RuntimeError("Non-finite mask_logit_drop detected before sampling")
+
+        if mask_sampler is not None and getattr(mask_sampler, "enabled", False):
+            step_value = 0 if mask_step is None else int(mask_step)
+            mask_bits, mask_keep_values, mask_probabilities = mask_sampler.sample(
+                mask_logit_keep,
+                mask_logit_drop,
+                step_value,
+                newborn_cycles,
+            )
+            mask_keep_probs = mask_probabilities[..., 0].contiguous()
     else:
         xyz, color, opacity, scaling, rot = generate_neural_gaussians(viewpoint_camera, pc, visible_mask, is_training=is_training, ape_code=ape_code)
 
@@ -190,38 +257,69 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         sh_degree=1,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
-        debug=pipe.debug
+        debug=pipe.debug,
+        diagnostics_enable_mask_hitmap=diag_mask_hitmap,
+        diagnostics_mask_top_k=max(diag_mask_top_k, 0),
     )
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-    
-    # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    rendered_image, radii = rasterizer(
+
+    # Rasterize visible Gaussians to image, obtain their radii (on screen).
+    mask_keep_prob_tensor = mask_keep_probs if mask_keep_probs is not None else torch.empty(0, dtype=color.dtype, device=color.device)
+
+    rendered_image, radii, final_transmittance, mask_hitmap = rasterizer(
         means3D = xyz,
         means2D = screenspace_points,
         shs = None,
         colors_precomp = color,
         opacities = opacity,
+        masks = mask_bits,
+        mask_keep_probabilities = mask_keep_prob_tensor,
         scales = scaling,
         rotations = rot,
         cov3D_precomp = None)
 
+    if not torch.isfinite(final_transmittance).all():
+        raise RuntimeError("Non-finite transmittance detected in rasterizer output")
+
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     if is_training:
-        return {"render": rendered_image,
-                "viewspace_points": screenspace_points,
-                "visibility_filter" : radii > 0,
-                "radii": radii,
-                "selection_mask": mask,
-                "neural_opacity": neural_opacity,
-                "scaling": scaling,
-                }
+        result = {"render": rendered_image,
+                  "viewspace_points": screenspace_points,
+                  "visibility_filter" : radii > 0,
+                  "radii": radii,
+                  "selection_mask": mask,
+                  "neural_opacity": neural_opacity,
+                  "scaling": scaling,
+                  "final_transmittance": final_transmittance,
+                  }
+
+        if mask_logit_keep is not None:
+            result["mask_logits_keep"] = mask_logit_keep
+        if mask_logit_drop is not None:
+            result["mask_logits_drop"] = mask_logit_drop
+        if newborn_cycles is not None:
+            result["newborn_cycles"] = newborn_cycles
+        if mask_keep_values is not None:
+            result["mask_keep_values"] = mask_keep_values
+        if mask_probabilities is not None:
+            result["mask_probabilities"] = mask_probabilities
+        if mask_bits is not None:
+            result["mask_bits"] = mask_bits
+        if mask_hitmap is not None and mask_hitmap.numel() > 0 and diag_mask_hitmap:
+            result["mask_topk_hit_map"] = mask_hitmap
+
+        return result
     else:
-        return {"render": rendered_image,
-                "viewspace_points": screenspace_points,
-                "visibility_filter" : radii > 0,
-                "radii": radii,
-                }
+        result = {"render": rendered_image,
+                  "viewspace_points": screenspace_points,
+                  "visibility_filter" : radii > 0,
+                  "radii": radii,
+                  "final_transmittance": final_transmittance,
+                  }
+        if mask_hitmap is not None and mask_hitmap.numel() > 0 and diag_mask_hitmap:
+            result["mask_topk_hit_map"] = mask_hitmap
+        return result
 
 
 def prefilter_voxel(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):

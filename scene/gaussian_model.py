@@ -96,6 +96,11 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+        self._mask_logit_keep = torch.empty(0)
+        self._mask_logit_drop = torch.empty(0)
+        self.newborn_cycles_left = torch.empty(0, dtype=torch.uint8)
+        self.legacy_prune_enabled = True
+        self.legacy_prune_threshold_scale = 1.0
 
         self.offset_gradient_accum = torch.empty(0)
         self.offset_denom = torch.empty(0)
@@ -172,7 +177,7 @@ class GaussianModel:
             self.spatial_lr_scale,
         )
 
-    def restore(self, model_args, training_args):
+    def restore(self, model_args, training_args, pruning=None):
         (self.active_sh_degree,
         self._anchor,
         self._level,
@@ -184,7 +189,7 @@ class GaussianModel:
         denom,
         opt_dict,
         self.spatial_lr_scale) = model_args
-        self.training_setup(training_args)
+        self.training_setup(training_args, pruning)
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
@@ -338,6 +343,8 @@ class GaussianModel:
         rots = torch.zeros((self.positions.shape[0], 4), device="cuda")
         rots[:, 0] = 1
         opacities = inverse_sigmoid(0.1 * torch.ones((self.positions.shape[0], 1), dtype=torch.float, device="cuda"))
+        mask_logit_keep = torch.full((self.positions.shape[0], 1), 0.5, dtype=torch.float, device="cuda")
+        mask_logit_drop = torch.zeros((self.positions.shape[0], 1), dtype=torch.float, device="cuda")
 
         self._anchor = nn.Parameter(self.positions.requires_grad_(True))
         self._offset = nn.Parameter(offsets.requires_grad_(True))
@@ -345,9 +352,12 @@ class GaussianModel:
         self._scaling = nn.Parameter(scales.requires_grad_(True))
         self._rotation = nn.Parameter(rots.requires_grad_(False))
         self._opacity = nn.Parameter(opacities.requires_grad_(False))
+        self._mask_logit_keep = nn.Parameter(mask_logit_keep.requires_grad_(True))
+        self._mask_logit_drop = nn.Parameter(mask_logit_drop.requires_grad_(True))
         self._level = self._level.unsqueeze(dim=1)
         self._extra_level = torch.zeros(self._anchor.shape[0], dtype=torch.float, device="cuda")
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self.newborn_cycles_left = torch.zeros(self._anchor.shape[0], dtype=torch.uint8, device="cuda")
 
     def map_to_int_level(self, pred_level, cur_level):
         if self.dist2level=='floor':
@@ -403,8 +413,51 @@ class GaussianModel:
         int_level = self.map_to_int_level(pred_level, cur_level)
         self._anchor_mask = (self._level.squeeze(dim=1) <= int_level)
 
-    def training_setup(self, training_args):
+    def training_setup(self, training_args, pruning=None):
         self.percent_dense = training_args.percent_dense
+        self._pruning_params = pruning
+        self.mask_newborn_protect_cycles = 0
+        self.legacy_prune_enabled = True
+        self.legacy_prune_threshold_scale = 1.0
+        self.mask_remove_rule = "all_zero"
+        self.mask_remove_hits_window = 1
+        self.mask_remove_hits_threshold = 0
+        self._mask_keep_hit_window = None
+        self._mask_keep_hit_index = 0
+        self._mask_keep_hit_sums = None
+        mask_config = None
+        legacy_config = None
+        if pruning is not None and hasattr(pruning, "mask"):
+            mask_config = pruning.mask
+        if pruning is not None and hasattr(pruning, "legacy"):
+            legacy_config = pruning.legacy
+        mask_enabled = False
+        if mask_config is not None:
+            self.mask_newborn_protect_cycles = int(getattr(mask_config, "newborn_protect_cycles", 0))
+            mask_enabled = bool(getattr(mask_config, "enabled", False))
+            remove_rule = str(getattr(mask_config, "remove_rule", "all_zero")).lower()
+            if remove_rule in {"all_zero", "threshold"}:
+                self.mask_remove_rule = remove_rule
+            remove_window = getattr(mask_config, "remove_hits_window", None)
+            if remove_window is not None:
+                try:
+                    self.mask_remove_hits_window = max(int(remove_window), 1)
+                except (TypeError, ValueError):
+                    self.mask_remove_hits_window = 1
+            remove_threshold = getattr(mask_config, "remove_hits_threshold", None)
+            if remove_threshold is not None:
+                try:
+                    self.mask_remove_hits_threshold = max(int(remove_threshold), 0)
+                except (TypeError, ValueError):
+                    self.mask_remove_hits_threshold = 0
+        if mask_enabled:
+            allow_legacy = False
+            if legacy_config is not None:
+                allow_legacy = bool(getattr(legacy_config, "enabled_when_mask", False))
+            if allow_legacy:
+                self.legacy_prune_threshold_scale = 1.5
+            else:
+                self.legacy_prune_enabled = False
 
         self.opacity_accum = torch.zeros((self.get_anchor.shape[0], 1), device="cuda")
 
@@ -412,11 +465,15 @@ class GaussianModel:
         self.offset_denom = torch.zeros((self.get_anchor.shape[0]*self.n_offsets, 1), device="cuda")
         self.anchor_demon = torch.zeros((self.get_anchor.shape[0], 1), device="cuda")
 
+        mask_lr = training_args.feature_lr * 0.5
+
         l = [
             {'params': [self._anchor], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "anchor"},
             {'params': [self._offset], 'lr': training_args.offset_lr_init * self.spatial_lr_scale, "name": "offset"},
             {'params': [self._anchor_feat], 'lr': training_args.feature_lr, "name": "anchor_feat"},
             {'params': [self._opacity], 'lr': training_args.opacity_lr, "name": "opacity"},
+            {'params': [self._mask_logit_keep], 'lr': mask_lr, "name": "mask_logit_keep"},
+            {'params': [self._mask_logit_drop], 'lr': mask_lr, "name": "mask_logit_drop"},
             {'params': [self._scaling], 'lr': training_args.scaling_lr, "name": "scaling"},
             {'params': [self._rotation], 'lr': training_args.rotation_lr, "name": "rotation"},
             {'params': self.mlp_opacity.parameters(), 'lr': training_args.mlp_opacity_lr_init, "name": "mlp_opacity"},
@@ -458,10 +515,66 @@ class GaussianModel:
                                                         lr_delay_mult=training_args.mlp_featurebank_lr_delay_mult,
                                                         max_steps=training_args.mlp_featurebank_lr_max_steps)
         if self.appearance_dim > 0:
-            self.appearance_scheduler_args = get_expon_lr_func(lr_init=training_args.appearance_lr_init,
+                self.appearance_scheduler_args = get_expon_lr_func(lr_init=training_args.appearance_lr_init,
                                                         lr_final=training_args.appearance_lr_final,
                                                         lr_delay_mult=training_args.appearance_lr_delay_mult,
                                                         max_steps=training_args.appearance_lr_max_steps)
+
+    def _ensure_mask_history_buffers(self, num_gaussians: int):
+        if getattr(self, "mask_remove_rule", "all_zero") != "threshold":
+            return
+        window = max(int(getattr(self, "mask_remove_hits_window", 1)), 1)
+        device = self._mask_logit_keep.device
+        if self._mask_keep_hit_window is None:
+            self._mask_keep_hit_window = torch.zeros((window, num_gaussians), dtype=torch.uint8, device=device)
+            self._mask_keep_hit_sums = torch.zeros((num_gaussians,), dtype=torch.int32, device=device)
+            self._mask_keep_hit_index = 0
+            return
+        if self._mask_keep_hit_window.shape[0] != window:
+            self._mask_keep_hit_window = torch.zeros((window, num_gaussians), dtype=torch.uint8, device=device)
+            self._mask_keep_hit_sums = torch.zeros((num_gaussians,), dtype=torch.int32, device=device)
+            self._mask_keep_hit_index = 0
+            return
+        if self._mask_keep_hit_window.shape[1] < num_gaussians:
+            diff = num_gaussians - self._mask_keep_hit_window.shape[1]
+            pad = torch.zeros((window, diff), dtype=torch.uint8, device=device)
+            self._mask_keep_hit_window = torch.cat([self._mask_keep_hit_window, pad], dim=1)
+            sum_pad = torch.zeros((diff,), dtype=torch.int32, device=device)
+            self._mask_keep_hit_sums = torch.cat([self._mask_keep_hit_sums, sum_pad], dim=0)
+        elif self._mask_keep_hit_window.shape[1] > num_gaussians:
+            self._mask_keep_hit_window = self._mask_keep_hit_window[:, :num_gaussians]
+            self._mask_keep_hit_sums = self._mask_keep_hit_sums[:num_gaussians]
+
+    def _assert_consistent_tensor_lengths(self):
+        expected = self._anchor.shape[0]
+        if self._anchor_feat.shape[0] != expected:
+            raise RuntimeError("Anchor feat tensor length mismatch after compaction")
+        if self._opacity.shape[0] != expected:
+            raise RuntimeError("Opacity tensor length mismatch after compaction")
+        if self._mask_logit_keep.shape[0] != expected or self._mask_logit_drop.shape[0] != expected:
+            raise RuntimeError("Mask logit tensor length mismatch after compaction")
+        if self._scaling.shape[0] != expected or self._rotation.shape[0] != expected:
+            raise RuntimeError("Scale/rotation tensor length mismatch after compaction")
+        if self._level.shape[0] != expected or self._extra_level.shape[0] != expected:
+            raise RuntimeError("Level tensors length mismatch after compaction")
+        if self.newborn_cycles_left.shape[0] != expected:
+            raise RuntimeError("Newborn cycles tensor length mismatch after compaction")
+        if hasattr(self, "_mask_keep_hit_window") and self._mask_keep_hit_window is not None:
+            if self._mask_keep_hit_window.shape[1] != expected:
+                raise RuntimeError("Mask history window length mismatch after compaction")
+            if self._mask_keep_hit_sums is not None and self._mask_keep_hit_sums.shape[0] != expected:
+                raise RuntimeError("Mask history sums length mismatch after compaction")
+        expected_offsets = expected * self.n_offsets
+        if self._offset.shape[0] != expected_offsets:
+            raise RuntimeError("Offset tensor length mismatch after compaction")
+        if self.offset_gradient_accum.shape[0] != expected_offsets:
+            raise RuntimeError("Offset gradient tensor length mismatch after compaction")
+        if self.offset_denom.shape[0] != expected_offsets:
+            raise RuntimeError("Offset denom tensor length mismatch after compaction")
+        if self.opacity_accum.shape[0] != expected:
+            raise RuntimeError("Opacity accum tensor length mismatch after compaction")
+        if self.anchor_demon.shape[0] != expected:
+            raise RuntimeError("Anchor demon tensor length mismatch after compaction")
 
     def update_learning_rate(self, iteration):
         ''' Learning rate scheduling per step '''
@@ -501,6 +614,9 @@ class GaussianModel:
         for i in range(self._anchor_feat.shape[1]):
             l.append('f_anchor_feat_{}'.format(i))
         l.append('opacity')
+        l.append('mask_logit_keep')
+        l.append('mask_logit_drop')
+        l.append('newborn_cycles_left')
         for i in range(self._scaling.shape[1]):
             l.append('scale_{}'.format(i))
         for i in range(self._rotation.shape[1]):
@@ -520,13 +636,27 @@ class GaussianModel:
         anchor_feats = self._anchor_feat.detach().cpu().numpy()
         offsets = self._offset.detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         opacities = self._opacity.detach().cpu().numpy()
+        mask_logit_keep = self._mask_logit_keep.detach().cpu().numpy()
+        mask_logit_drop = self._mask_logit_drop.detach().cpu().numpy()
+        newborn_cycles = self.newborn_cycles_left.detach().cpu().numpy().astype(np.float32).reshape(-1, 1)
         scales = self._scaling.detach().cpu().numpy()
         rots = self._rotation.detach().cpu().numpy()
 
         dtype_full = [(attribute, 'f4') for attribute in self.construct_list_of_attributes()]
 
         elements = np.empty(anchor.shape[0], dtype=dtype_full)
-        attributes = np.concatenate((anchor, levels, extra_levels, infos, offsets, anchor_feats, opacities, scales, rots), axis=1)
+        attributes = np.concatenate((anchor,
+                                     levels,
+                                     extra_levels,
+                                     infos,
+                                     offsets,
+                                     anchor_feats,
+                                     opacities,
+                                     mask_logit_keep,
+                                     mask_logit_drop,
+                                     newborn_cycles,
+                                     scales,
+                                     rots), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
@@ -549,6 +679,18 @@ class GaussianModel:
         self.standard_dist = torch.tensor(plydata.elements[0]["info"][1]).float()
 
         opacities = np.asarray(plydata.elements[0]["opacity"])[..., np.newaxis].astype(np.float32)
+        if "mask_logit_keep" in plydata.elements[0].data.dtype.names:
+            mask_logit_keep = np.asarray(plydata.elements[0]["mask_logit_keep"])[..., np.newaxis].astype(np.float32)
+        else:
+            mask_logit_keep = np.full((anchor.shape[0], 1), 0.5, dtype=np.float32)
+        if "mask_logit_drop" in plydata.elements[0].data.dtype.names:
+            mask_logit_drop = np.asarray(plydata.elements[0]["mask_logit_drop"])[..., np.newaxis].astype(np.float32)
+        else:
+            mask_logit_drop = np.zeros((anchor.shape[0], 1), dtype=np.float32)
+        if "newborn_cycles_left" in plydata.elements[0].data.dtype.names:
+            newborn_cycles = np.asarray(plydata.elements[0]["newborn_cycles_left"])[..., np.newaxis]
+        else:
+            newborn_cycles = np.zeros((anchor.shape[0], 1), dtype=np.float32)
 
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
@@ -583,9 +725,12 @@ class GaussianModel:
         self._anchor = nn.Parameter(torch.tensor(anchor, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(False))
+        self._mask_logit_keep = nn.Parameter(torch.tensor(mask_logit_keep, dtype=torch.float, device="cuda").requires_grad_(True))
+        self._mask_logit_drop = nn.Parameter(torch.tensor(mask_logit_drop, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(False))
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
         self.levels = torch.max(self._level) - torch.min(self._level) + 1
+        self.newborn_cycles_left = torch.tensor(newborn_cycles.squeeze(axis=1), dtype=torch.uint8, device="cuda")
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -696,10 +841,106 @@ class GaussianModel:
         self._offset = optimizable_tensors["offset"]
         self._anchor_feat = optimizable_tensors["anchor_feat"]
         self._opacity = optimizable_tensors["opacity"]
+        self._mask_logit_keep = optimizable_tensors["mask_logit_keep"]
+        self._mask_logit_drop = optimizable_tensors["mask_logit_drop"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
         self._level = self._level[valid_points_mask]
         self._extra_level = self._extra_level[valid_points_mask]
+        self.newborn_cycles_left = self.newborn_cycles_left[valid_points_mask]
+        if self._mask_keep_hit_window is not None:
+            self._mask_keep_hit_window = self._mask_keep_hit_window[:, valid_points_mask]
+        if self._mask_keep_hit_sums is not None:
+            self._mask_keep_hit_sums = self._mask_keep_hit_sums[valid_points_mask]
+        if hasattr(self, "_anchor_mask"):
+            self._anchor_mask = self._anchor_mask[valid_points_mask]
+        if hasattr(self, "_prog_ratio"):
+            self._prog_ratio = self._prog_ratio[valid_points_mask]
+        if hasattr(self, "transition_mask"):
+            self.transition_mask = self.transition_mask[valid_points_mask]
+
+        self._assert_consistent_tensor_lengths()
+
+    def probabilistic_mask_prune(
+        self,
+        mask_sampler,
+        step: int,
+        *,
+        rng_offset: int = 0,
+    ) -> int:
+        if mask_sampler is None or not getattr(mask_sampler, "enabled", False):
+            return 0
+        if self._mask_logit_keep.numel() == 0:
+            return 0
+
+        with torch.no_grad():
+            keep_logits = self._mask_logit_keep
+            drop_logits = self._mask_logit_drop
+            newborn_cycles = self.newborn_cycles_left
+
+            _, _, _, trial_keep = mask_sampler.sample(
+                keep_logits,
+                drop_logits,
+                step,
+                newborn_cycles,
+                rng_offset=rng_offset,
+                return_trials=True,
+            )
+
+            if trial_keep.numel() == 0:
+                return 0
+
+            if trial_keep.dim() == 1:
+                trial_keep = trial_keep.unsqueeze(0)
+
+            kept_any = trial_keep.sum(dim=0) > 0
+            protect_mask = newborn_cycles > 0
+            remove_rule = getattr(self, "mask_remove_rule", "all_zero")
+            if remove_rule == "threshold":
+                self._ensure_mask_history_buffers(trial_keep.shape[1])
+                current_hits = kept_any.to(torch.uint8)
+                window = max(int(getattr(self, "mask_remove_hits_window", 1)), 1)
+                index = getattr(self, "_mask_keep_hit_index", 0) % window
+                previous = self._mask_keep_hit_window[index]
+                self._mask_keep_hit_window[index] = current_hits
+                if self._mask_keep_hit_sums is None or self._mask_keep_hit_sums.shape[0] != current_hits.shape[0]:
+                    self._mask_keep_hit_sums = torch.zeros_like(current_hits, dtype=torch.int32)
+                self._mask_keep_hit_sums = self._mask_keep_hit_sums + current_hits.to(torch.int32) - previous.to(torch.int32)
+                self._mask_keep_hit_index = (index + 1) % window
+                threshold = max(int(getattr(self, "mask_remove_hits_threshold", 0)), 0)
+                removable_mask = torch.logical_and(self._mask_keep_hit_sums <= threshold, ~protect_mask)
+            else:
+                removable_mask = torch.logical_and(~kept_any, ~protect_mask)
+            removed = int(removable_mask.sum().item())
+
+            updated_newborn = None
+            if protect_mask.any():
+                updated_newborn = self.newborn_cycles_left.clone()
+                decrement_mask = torch.logical_and(protect_mask, ~removable_mask)
+                if decrement_mask.any():
+                    updated_newborn[decrement_mask] -= 1
+
+            if removed > 0:
+                if hasattr(self, "offset_denom"):
+                    reshaped = self.offset_denom.view([-1, self.n_offsets])
+                    self.offset_denom = reshaped[~removable_mask].reshape(-1, 1)
+                if hasattr(self, "offset_gradient_accum"):
+                    reshaped_grad = self.offset_gradient_accum.view([-1, self.n_offsets])
+                    self.offset_gradient_accum = reshaped_grad[~removable_mask].reshape(-1, 1)
+                if hasattr(self, "opacity_accum"):
+                    self.opacity_accum = self.opacity_accum[~removable_mask]
+                if hasattr(self, "anchor_demon"):
+                    self.anchor_demon = self.anchor_demon[~removable_mask]
+
+                self.prune_anchor(removable_mask)
+
+            if updated_newborn is not None:
+                updated_newborn = torch.clamp(updated_newborn, min=0)
+                if removed > 0:
+                    updated_newborn = updated_newborn[~removable_mask]
+                self.newborn_cycles_left = updated_newborn
+
+            return removed
 
     def get_remove_duplicates(self, grid_coords, selected_grid_coords_unique, use_chunk = True):
         if use_chunk:
@@ -816,6 +1057,9 @@ class GaussianModel:
                 new_offsets_ds = torch.zeros_like(candidate_anchor_ds).unsqueeze(dim=1).repeat([1,self.n_offsets,1]).float().cuda()
                 new_offsets = torch.cat([new_offsets, new_offsets_ds], dim=0)
 
+                new_mask_logit_keep = torch.full((new_opacities.shape[0], 1), 0.8, dtype=torch.float, device="cuda")
+                new_mask_logit_drop = torch.zeros((new_opacities.shape[0], 1), dtype=torch.float, device="cuda")
+
                 new_extra_level = torch.zeros(candidate_anchor.shape[0], dtype=torch.float, device='cuda')
                 new_extra_level_ds = torch.zeros(candidate_anchor_ds.shape[0], dtype=torch.float, device='cuda')
                 new_extra_level = torch.cat([new_extra_level, new_extra_level_ds])
@@ -827,6 +1071,8 @@ class GaussianModel:
                     "anchor_feat": new_feat,
                     "offset": new_offsets,
                     "opacity": new_opacities,
+                    "mask_logit_keep": new_mask_logit_keep,
+                    "mask_logit_drop": new_mask_logit_drop,
                 }
 
                 temp_anchor_demon = torch.cat([self.anchor_demon, torch.zeros([new_opacities.shape[0], 1], device='cuda').float()], dim=0)
@@ -846,17 +1092,35 @@ class GaussianModel:
                 self._anchor_feat = optimizable_tensors["anchor_feat"]
                 self._offset = optimizable_tensors["offset"]
                 self._opacity = optimizable_tensors["opacity"]
+                self._mask_logit_keep = optimizable_tensors["mask_logit_keep"]
+                self._mask_logit_drop = optimizable_tensors["mask_logit_drop"]
                 self._level = torch.cat([self._level, new_level], dim=0)
                 self._extra_level = torch.cat([self._extra_level, new_extra_level], dim=0)
 
+                protect_cycles = torch.full((new_opacities.shape[0],), self.mask_newborn_protect_cycles, dtype=torch.uint8, device='cuda')
+                self.newborn_cycles_left = torch.cat([self.newborn_cycles_left, protect_cycles], dim=0)
+
+                self._ensure_mask_history_buffers(self._mask_logit_keep.shape[0])
+                self._assert_consistent_tensor_lengths()
+
     def adjust_anchor(self, iteration, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, update_ratio=0.5, extra_ratio=4.0, extra_up=0.25, min_opacity=0.005):
         # # adding anchors
+        legacy_prune_enabled = getattr(self, "legacy_prune_enabled", True)
+        threshold_scale = getattr(self, "legacy_prune_threshold_scale", 1.0) if legacy_prune_enabled else 1.0
+
         grads = self.offset_gradient_accum / self.offset_denom # [N*k, 1]
         grads[grads.isnan()] = 0.0
         grads_norm = torch.norm(grads, dim=-1)
-        offset_mask = (self.offset_denom > check_interval*success_threshold*0.5).squeeze(dim=1)
+        success_threshold_value = success_threshold
+        if legacy_prune_enabled and threshold_scale != 1.0:
+            success_threshold_value = success_threshold * threshold_scale
+        offset_mask = (self.offset_denom > check_interval*success_threshold_value*0.5).squeeze(dim=1)
 
-        self.anchor_growing(iteration, grads_norm, grad_threshold, update_ratio, extra_ratio, extra_up, offset_mask)
+        grad_threshold_value = grad_threshold
+        if legacy_prune_enabled and threshold_scale != 1.0:
+            grad_threshold_value = grad_threshold * threshold_scale
+
+        self.anchor_growing(iteration, grads_norm, grad_threshold_value, update_ratio, extra_ratio, extra_up, offset_mask)
 
         # update offset_denom
         self.offset_denom[offset_mask] = 0
@@ -872,8 +1136,20 @@ class GaussianModel:
         self.offset_gradient_accum = torch.cat([self.offset_gradient_accum, padding_offset_gradient_accum], dim=0)
 
         # # prune anchors
-        prune_mask = (self.opacity_accum < min_opacity*self.anchor_demon).squeeze(dim=1)
-        anchors_mask = (self.anchor_demon > check_interval*success_threshold).squeeze(dim=1) # [N, 1]
+        anchors_mask = (self.anchor_demon > check_interval*success_threshold_value).squeeze(dim=1) # [N, 1]
+
+        if not legacy_prune_enabled:
+            if anchors_mask.sum()>0:
+                self.opacity_accum[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+                self.anchor_demon[anchors_mask] = torch.zeros([anchors_mask.sum(), 1], device='cuda').float()
+            return
+
+        min_opacity_value = min_opacity
+        if threshold_scale != 1.0:
+            # Lower the opacity threshold to soften legacy pruning when masks remain active.
+            min_opacity_value = min_opacity / threshold_scale
+
+        prune_mask = (self.opacity_accum < min_opacity_value*self.anchor_demon).squeeze(dim=1)
         prune_mask = torch.logical_and(prune_mask, anchors_mask) # [N]
 
         # update offset_denom

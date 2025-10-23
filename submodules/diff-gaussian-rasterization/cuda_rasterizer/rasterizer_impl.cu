@@ -68,22 +68,25 @@ __global__ void checkFrustum(int P,
 // Generates one key/value pair for all Gaussian / tile overlaps. 
 // Run once per Gaussian (1:N mapping).
 __global__ void duplicateWithKeys(
-	int P,
-	const float2* points_xy,
-	const float* depths,
-	const uint32_t* offsets,
-	uint64_t* gaussian_keys_unsorted,
-	uint32_t* gaussian_values_unsorted,
-	int* radii,
-	dim3 grid)
+        int P,
+        const float2* points_xy,
+        const float* depths,
+        const uint32_t* offsets,
+        uint64_t* gaussian_keys_unsorted,
+        uint32_t* gaussian_values_unsorted,
+        const uint8_t* gaussian_masks,
+        uint8_t use_masks,
+        uint8_t* gaussian_mask_values_unsorted,
+        int* radii,
+        dim3 grid)
 {
 	auto idx = cg::this_grid().thread_rank();
 	if (idx >= P)
 		return;
 
 	// Generate no key/value pair for invisible Gaussians
-	if (radii[idx] > 0)
-	{
+        if (radii[idx] > 0)
+        {
 		// Find this Gaussian's offset in buffer for writing keys/values.
 		uint32_t off = (idx == 0) ? 0 : offsets[idx - 1];
 		uint2 rect_min, rect_max;
@@ -99,15 +102,17 @@ __global__ void duplicateWithKeys(
 		{
 			for (int x = rect_min.x; x < rect_max.x; x++)
 			{
-				uint64_t key = y * grid.x + x;
-				key <<= 32;
-				key |= *((uint32_t*)&depths[idx]);
-				gaussian_keys_unsorted[off] = key;
-				gaussian_values_unsorted[off] = idx;
-				off++;
-			}
-		}
-	}
+                                uint64_t key = y * grid.x + x;
+                                key <<= 32;
+                                key |= *((uint32_t*)&depths[idx]);
+                                gaussian_keys_unsorted[off] = key;
+                                gaussian_values_unsorted[off] = idx;
+                                uint8_t mask_value = use_masks ? gaussian_masks[idx] : 1u;
+                                gaussian_mask_values_unsorted[off] = mask_value;
+                                off++;
+                        }
+                }
+        }
 }
 
 // Check keys to see if it is at the start/end of one tile's range in 
@@ -180,44 +185,53 @@ CudaRasterizer::ImageState CudaRasterizer::ImageState::fromChunk(char*& chunk, s
 
 CudaRasterizer::BinningState CudaRasterizer::BinningState::fromChunk(char*& chunk, size_t P)
 {
-	BinningState binning;
-	obtain(chunk, binning.point_list, P, 128);
-	obtain(chunk, binning.point_list_unsorted, P, 128);
-	obtain(chunk, binning.point_list_keys, P, 128);
-	obtain(chunk, binning.point_list_keys_unsorted, P, 128);
-	cub::DeviceRadixSort::SortPairs(
-		nullptr, binning.sorting_size,
-		binning.point_list_keys_unsorted, binning.point_list_keys,
-		binning.point_list_unsorted, binning.point_list, P);
-	obtain(chunk, binning.list_sorting_space, binning.sorting_size, 128);
+        BinningState binning;
+        obtain(chunk, binning.point_list, P, 128);
+        obtain(chunk, binning.point_list_unsorted, P, 128);
+        obtain(chunk, binning.point_list_keys, P, 128);
+        obtain(chunk, binning.point_list_keys_unsorted, P, 128);
+        obtain(chunk, binning.point_list_masks, P, 128);
+        obtain(chunk, binning.point_list_masks_unsorted, P, 128);
+        obtain(chunk, binning.masks_provided_flag, 1, 128);
+        cub::DeviceRadixSort::SortPairs(
+                nullptr, binning.sorting_size,
+                binning.point_list_keys_unsorted, binning.point_list_keys,
+                binning.point_list_unsorted, binning.point_list, P);
+        obtain(chunk, binning.list_sorting_space, binning.sorting_size, 128);
 	return binning;
 }
 
 // Forward rendering procedure for differentiable rasterization
 // of Gaussians.
 int CudaRasterizer::Rasterizer::forward(
-	std::function<char* (size_t)> geometryBuffer,
-	std::function<char* (size_t)> binningBuffer,
-	std::function<char* (size_t)> imageBuffer,
-	const int P, int D, int M,
-	const float* background,
-	const int width, int height,
-	const float* means3D,
-	const float* shs,
-	const float* colors_precomp,
-	const float* opacities,
-	const float* scales,
-	const float scale_modifier,
-	const float* rotations,
-	const float* cov3D_precomp,
-	const float* viewmatrix,
-	const float* projmatrix,
-	const float* cam_pos,
-	const float tan_fovx, float tan_fovy,
-	const bool prefiltered,
-	float* out_color,
-	int* radii,
-	bool debug)
+        std::function<char* (size_t)> geometryBuffer,
+        std::function<char* (size_t)> binningBuffer,
+        std::function<char* (size_t)> imageBuffer,
+        const int P, int D, int M,
+        const float* background,
+        const int width, int height,
+        const float* means3D,
+        const float* shs,
+        const float* colors_precomp,
+        const float* opacities,
+        const uint8_t* masks,
+        bool masks_provided,
+        const float* mask_keep_probabilities,
+        uint32_t mask_top_k,
+        const float* scales,
+        const float scale_modifier,
+        const float* rotations,
+        const float* cov3D_precomp,
+        const float* viewmatrix,
+        const float* projmatrix,
+        const float* cam_pos,
+        const float tan_fovx, float tan_fovy,
+        const bool prefiltered,
+        float* out_color,
+        int* radii,
+        bool debug,
+        float* final_trans_output,
+        float* mask_hit_output)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -286,28 +300,55 @@ int CudaRasterizer::Rasterizer::forward(
 
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
-		P,
-		geomState.means2D,
-		geomState.depths,
-		geomState.point_offsets,
-		binningState.point_list_keys_unsorted,
-		binningState.point_list_unsorted,
-		radii,
-		tile_grid)
-	CHECK_CUDA(, debug)
+        duplicateWithKeys << <(P + 255) / 256, 256 >> > (
+                P,
+                geomState.means2D,
+                geomState.depths,
+                geomState.point_offsets,
+                binningState.point_list_keys_unsorted,
+                binningState.point_list_unsorted,
+                masks,
+                static_cast<uint8_t>(masks_provided),
+                binningState.point_list_masks_unsorted,
+                radii,
+                tile_grid)
+        CHECK_CUDA(, debug)
 
 	int bit = getHigherMsb(tile_grid.x * tile_grid.y);
 
 	// Sort complete list of (duplicated) Gaussian indices by keys
-	CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
-		binningState.list_sorting_space,
-		binningState.sorting_size,
-		binningState.point_list_keys_unsorted, binningState.point_list_keys,
-		binningState.point_list_unsorted, binningState.point_list,
-		num_rendered, 0, 32 + bit), debug)
+        CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
+                binningState.list_sorting_space,
+                binningState.sorting_size,
+                binningState.point_list_keys_unsorted, binningState.point_list_keys,
+                binningState.point_list_unsorted, binningState.point_list,
+                num_rendered, 0, 32 + bit), debug)
 
-	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
+        CHECK_CUDA(cudaMemset(binningState.masks_provided_flag, masks_provided ? 1 : 0, sizeof(uint8_t)), debug);
+
+        if (num_rendered > 0)
+        {
+                if (masks_provided)
+                {
+                        CHECK_CUDA(cub::DeviceRadixSort::SortPairs(
+                                binningState.list_sorting_space,
+                                binningState.sorting_size,
+                                binningState.point_list_keys_unsorted, binningState.point_list_keys,
+                                binningState.point_list_masks_unsorted, binningState.point_list_masks,
+                                num_rendered, 0, 32 + bit), debug)
+                }
+                else
+                {
+                        CHECK_CUDA(cudaMemset(binningState.point_list_masks, 1, num_rendered * sizeof(uint8_t)), debug);
+                }
+        }
+
+        if (masks_provided && num_rendered > 0)
+        {
+                CHECK_CUDA(cudaMemset(binningState.point_list_masks_unsorted, 0, num_rendered * sizeof(uint8_t)), debug);
+        }
+
+        CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
 
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
@@ -319,21 +360,31 @@ int CudaRasterizer::Rasterizer::forward(
 
 	// Let each tile blend its range of Gaussians independently in parallel
 	const float* feature_ptr = colors_precomp != nullptr ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(FORWARD::render(
-		tile_grid, block,
-		imgState.ranges,
-		binningState.point_list,
-		width, height,
-		geomState.means2D,
-		feature_ptr,
-		geomState.conic_opacity,
-		imgState.accum_alpha,
-		imgState.n_contrib,
-		background,
-		out_color
-		), debug)
+        CHECK_CUDA(FORWARD::render(
+                tile_grid, block,
+                imgState.ranges,
+                binningState.point_list,
+                width, height,
+                geomState.means2D,
+                feature_ptr,
+                geomState.conic_opacity,
+                imgState.accum_alpha,
+                imgState.n_contrib,
+                background,
+                out_color,
+                binningState.point_list_masks,
+                static_cast<uint8_t>(masks_provided),
+                mask_keep_probabilities,
+                mask_top_k,
+                mask_hit_output
+                ), debug)
 
-	return num_rendered;
+        if (final_trans_output != nullptr)
+        {
+                CHECK_CUDA(cudaMemcpy(final_trans_output, imgState.accum_alpha, width * height * sizeof(float), cudaMemcpyDeviceToDevice), debug);
+        }
+
+        return num_rendered;
 }
 
 
@@ -448,23 +499,31 @@ void CudaRasterizer::Rasterizer::backward(
 	// opacity and RGB of Gaussians from per-pixel loss gradients.
 	// If we were given precomputed colors and not SHs, use them.
 	const float* color_ptr = (colors_precomp != nullptr) ? colors_precomp : geomState.rgb;
-	CHECK_CUDA(BACKWARD::render(
-		tile_grid,
-		block,
-		imgState.ranges,
-		binningState.point_list,
-		width, height,
-		background,
-		geomState.means2D,
-		geomState.conic_opacity,
-		color_ptr,
-		imgState.accum_alpha,
-		imgState.n_contrib,
-		dL_dpix,
-		(float3*)dL_dmean2D,
-		(float4*)dL_dconic,
-		dL_dopacity,
-		dL_dcolor), debug)
+        uint8_t masks_flag_host = 0;
+        if (binningState.masks_provided_flag != nullptr)
+        {
+                CHECK_CUDA(cudaMemcpy(&masks_flag_host, binningState.masks_provided_flag, sizeof(uint8_t), cudaMemcpyDeviceToHost), debug);
+        }
+
+        CHECK_CUDA(BACKWARD::render(
+                tile_grid,
+                block,
+                imgState.ranges,
+                binningState.point_list,
+                width, height,
+                background,
+                geomState.means2D,
+                geomState.conic_opacity,
+                color_ptr,
+                imgState.accum_alpha,
+                imgState.n_contrib,
+                dL_dpix,
+                (float3*)dL_dmean2D,
+                (float4*)dL_dconic,
+                dL_dopacity,
+                dL_dcolor,
+                binningState.point_list_masks,
+                masks_flag_host), debug)
 
 	// Take care of the rest of preprocessing. Was the precomputed covariance
 	// given to us or a scales/rot pair? If precomputed, pass that. If not,

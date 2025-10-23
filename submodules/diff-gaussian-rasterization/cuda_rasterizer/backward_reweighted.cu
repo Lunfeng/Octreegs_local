@@ -403,20 +403,22 @@ __global__ void preprocessCUDA(
 template <uint32_t C>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
-	const uint2* __restrict__ ranges,
-	const uint32_t* __restrict__ point_list,
-	int W, int H,
-	const float* __restrict__ bg_color,
-	const float2* __restrict__ points_xy_image,
-	const float4* __restrict__ conic_opacity,
-	const float* __restrict__ colors,
-	const float* __restrict__ final_Ts,
-	const uint32_t* __restrict__ n_contrib,
-	const float* __restrict__ dL_dpixels,
-	float3* __restrict__ dL_dmean2D,
-	float4* __restrict__ dL_dconic2D,
-	float* __restrict__ dL_dopacity,
-	float* __restrict__ dL_dcolors)
+        const uint2* __restrict__ ranges,
+        const uint32_t* __restrict__ point_list,
+        int W, int H,
+        const float* __restrict__ bg_color,
+        const float2* __restrict__ points_xy_image,
+        const float4* __restrict__ conic_opacity,
+        const float* __restrict__ colors,
+        const float* __restrict__ final_Ts,
+        const uint32_t* __restrict__ n_contrib,
+        const float* __restrict__ dL_dpixels,
+        float3* __restrict__ dL_dmean2D,
+        float4* __restrict__ dL_dconic2D,
+        float* __restrict__ dL_dopacity,
+        float* __restrict__ dL_dcolors,
+        const uint8_t* __restrict__ masks,
+        uint8_t masks_provided)
 {
 	// We rasterize again. Compute necessary block info.
 	auto block = cg::this_thread_block();
@@ -435,10 +437,11 @@ renderCUDA(
 	bool done = !inside;
 	int toDo = range.y - range.x;
 
-	__shared__ int collected_id[BLOCK_SIZE];
-	__shared__ float2 collected_xy[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
-	__shared__ float collected_colors[C * BLOCK_SIZE];
+        __shared__ int collected_id[BLOCK_SIZE];
+        __shared__ float2 collected_xy[BLOCK_SIZE];
+        __shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+        __shared__ float collected_colors[C * BLOCK_SIZE];
+        __shared__ uint8_t collected_masks[BLOCK_SIZE];
 
 	// In the forward, we stored the final value for T, the
 	// product of all (1 - alpha) factors. 
@@ -471,15 +474,16 @@ renderCUDA(
 		// and load them in revers order.
 		block.sync();
 		const int progress = i * BLOCK_SIZE + block.thread_rank();
-		if (range.x + progress < range.y)
-		{
-			const int coll_id = point_list[range.y - progress - 1];
-			collected_id[block.thread_rank()] = coll_id;
-			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
-			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
-			for (int i = 0; i < C; i++)
-				collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
-		}
+                if (range.x + progress < range.y)
+                {
+                        const int coll_id = point_list[range.y - progress - 1];
+                        collected_id[block.thread_rank()] = coll_id;
+                        collected_xy[block.thread_rank()] = points_xy_image[coll_id];
+                        collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+                        for (int i = 0; i < C; i++)
+                                collected_colors[i * BLOCK_SIZE + block.thread_rank()] = colors[coll_id * C + i];
+                        collected_masks[block.thread_rank()] = masks_provided ? masks[range.y - progress - 1] : 1u;
+                }
 		block.sync();
 
 		// Iterate over Gaussians
@@ -499,13 +503,17 @@ renderCUDA(
 			if (power > 0.0f)
 				continue;
 
-			const float G = exp(power);
-			const float alpha = min(0.99f, con_o.w * G);
-			if (alpha < 1.0f / 255.0f)
-				continue;
+                        const float G = exp(power);
+                        const float alpha = fminf(0.995f, con_o.w * G);
+                        if (alpha < 1.0f / 255.0f)
+                                continue;
 
-			T = T / (1.f - alpha);
-			const float dchannel_dcolor = alpha * T;
+                        const uint8_t mask_bit = masks_provided ? collected_masks[j] : 1u;
+                        if (!mask_bit)
+                                continue;
+
+                        T = T / (1.f - alpha);
+                        const float dchannel_dcolor = alpha * T;
 
 			// Propagate gradients to per-Gaussian colors and keep
 			// gradients w.r.t. alpha (blending factor for a Gaussian/pixel
@@ -640,22 +648,26 @@ void BACKWARD::render(
 	float3* dL_dmean2D,
 	float4* dL_dconic2D,
 	float* dL_dopacity,
-	float* dL_dcolors)
+        float* dL_dcolors,
+        const uint8_t* masks,
+        uint8_t masks_provided)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> >(
-		ranges,
-		point_list,
-		W, H,
-		bg_color,
-		means2D,
-		conic_opacity,
-		colors,
-		final_Ts,
-		n_contrib,
-		dL_dpixels,
-		dL_dmean2D,
-		dL_dconic2D,
-		dL_dopacity,
-		dL_dcolors
-		);
+        renderCUDA<NUM_CHANNELS> << <grid, block >> >(
+                ranges,
+                point_list,
+                W, H,
+                bg_color,
+                means2D,
+                conic_opacity,
+                colors,
+                final_Ts,
+                n_contrib,
+                dL_dpixels,
+                dL_dmean2D,
+                dL_dconic2D,
+                dL_dopacity,
+                dL_dcolors,
+                masks,
+                masks_provided
+                );
 }
