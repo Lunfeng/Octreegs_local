@@ -1,0 +1,23 @@
+common:
+  lambda_dssim: 0.2
+  short_ft_iters: 800
+  final_ft_iters: 10000
+  rounds: 6
+  ema_momentum: 0.9
+  edge_topk_percent: 0.15
+  edge_boost: 1.35
+  leaf_q_reduce: 0.07
+  nmin_per_leaf: 18
+  rollback_enable: true
+  rollback_window_rounds: 2
+  rollback_ratio: 0.02
+  local_psnr_drop: 0.3
+
+mild:
+  gamma_iter: 0.275
+
+balanced:
+  gamma_iter: 0.325
+
+aggressive:
+  gamma_iter: 0.40
