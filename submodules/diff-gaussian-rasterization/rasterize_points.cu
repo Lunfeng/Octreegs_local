@@ -140,9 +140,11 @@ RasterizeGaussiansCUDA(
                 opacity.contiguous().data<float>(),
                 mask_ptr,
                 has_masks,
+                keep_ptr,
+                record_mask_hitmap ? mask_top_k : 0u,
                 scales.contiguous().data_ptr<float>(),
                 scale_modifier,
-		rotations.contiguous().data_ptr<float>(),
+                rotations.contiguous().data_ptr<float>(),
                 cov3D_precomp.contiguous().data<float>(),
                 viewmatrix.contiguous().data<float>(),
                 projmatrix.contiguous().data<float>(),
@@ -154,9 +156,7 @@ RasterizeGaussiansCUDA(
                 radii.contiguous().data<int>(),
                 debug,
                 final_trans.contiguous().data<float>(),
-                record_mask_hitmap ? mask_hit_map.contiguous().data_ptr<float>() : nullptr,
-                keep_ptr,
-                record_mask_hitmap ? mask_top_k : 0u);
+                record_mask_hitmap ? mask_hit_map.contiguous().data_ptr<float>() : nullptr);
   }
   return std::make_tuple(rendered, out_color, radii, final_trans, mask_hit_map, geomBuffer, binningBuffer, imgBuffer);
 }

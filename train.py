@@ -349,9 +349,6 @@ def training(dataset, opt, pipe, pruning, dataset_name, testing_iterations, savi
     if logger is not None and hasattr(pruning, "mask"):
         logger.info("Mask pruning enabled: %s", getattr(pruning.mask, "enabled", False))
 
-    if logger is not None and hasattr(pruning, "mask"):
-        logger.info("Mask pruning enabled: %s", getattr(pruning.mask, "enabled", False))
-
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
 
