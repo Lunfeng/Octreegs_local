@@ -201,7 +201,24 @@ class PruningMaskTempParams(ParamGroup):
 class PruningMaskSchedulerParams(ParamGroup):
     def __init__(self, parser):
         self.phase_breakpoints = [0.3, 0.7]
+        self.phase_weights = [1.0, 1.0, 1.0]
         super().__init__(parser, "Pruning Mask Scheduler", arg_prefix="pruning.mask.scheduler")
+
+
+class PruningMaskDiagnosticsParams(ParamGroup):
+    def __init__(self, parser):
+        self.log_interval = 1000
+        self.mask_hitmap_export = False
+        self.mask_hitmap_interval = 1000
+        self.mask_hitmap_top_k = 4
+        self.mask_hitmap_dir = "mask_hitmap"
+        self.transmittance_export = False
+        self.transmittance_interval = 1000
+        self.transmittance_dir = "transmittance_heatmap"
+        self.inspection_views = []
+        self.inspection_dir = "inspection_views"
+        self.inspection_rng_seed = 1337
+        super().__init__(parser, "Pruning Mask Diagnostics", arg_prefix="pruning.mask.diagnostics")
 
 
 class PruningMaskParams(ParamGroup):
@@ -212,25 +229,39 @@ class PruningMaskParams(ParamGroup):
         self.global_interval = 1000
         self.newborn_protect_cycles = 2
         self.remove_rule = "all_zero"
+        self.sampler = "gumbel"
+        self.regularizer = "l2"
+        self.remove_hits_window = 3
+        self.remove_hits_threshold = 0
         super().__init__(parser, "Pruning Mask Parameters", arg_prefix="pruning.mask")
 
         self._temp_params = PruningMaskTempParams(parser)
         self._scheduler_params = PruningMaskSchedulerParams(parser)
+        self._diagnostics_params = PruningMaskDiagnosticsParams(parser)
 
     def extract(self, args):
         mask_group = super().extract(args)
         mask_group.temp = self._temp_params.extract(args)
         mask_group.scheduler = self._scheduler_params.extract(args)
+        mask_group.diagnostics = self._diagnostics_params.extract(args)
         return mask_group
+
+
+class PruningLegacyParams(ParamGroup):
+    def __init__(self, parser):
+        self.enabled_when_mask = False
+        super().__init__(parser, "Pruning Legacy Parameters", arg_prefix="pruning.legacy")
 
 
 class PruningParams:
     def __init__(self, parser):
         self.mask = PruningMaskParams(parser)
+        self.legacy = PruningLegacyParams(parser)
 
     def extract(self, args):
         pruning_group = GroupParams()
         pruning_group.mask = self.mask.extract(args)
+        pruning_group.legacy = self.legacy.extract(args)
         return pruning_group
 
 

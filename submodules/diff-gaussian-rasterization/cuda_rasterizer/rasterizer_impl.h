@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <vector>
+#include <cstdint>
 #include "rasterizer.h"
 #include <cuda_runtime_api.h>
 
@@ -52,17 +53,20 @@ namespace CudaRasterizer
 		static ImageState fromChunk(char*& chunk, size_t N);
 	};
 
-	struct BinningState
-	{
-		size_t sorting_size;
-		uint64_t* point_list_keys_unsorted;
-		uint64_t* point_list_keys;
-		uint32_t* point_list_unsorted;
-		uint32_t* point_list;
-		char* list_sorting_space;
+        struct BinningState
+        {
+                size_t sorting_size;
+                uint64_t* point_list_keys_unsorted;
+                uint64_t* point_list_keys;
+                uint32_t* point_list_unsorted;
+                uint32_t* point_list;
+                uint8_t* point_list_masks_unsorted;
+                uint8_t* point_list_masks;
+                uint8_t* masks_provided_flag;
+                char* list_sorting_space;
 
-		static BinningState fromChunk(char*& chunk, size_t P);
-	};
+                static BinningState fromChunk(char*& chunk, size_t P);
+        };
 
 	template<typename T> 
 	size_t required(size_t P)
