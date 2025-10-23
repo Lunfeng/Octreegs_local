@@ -245,10 +245,33 @@ class GaussianModel:
     @property
     def leaf_ids(self) -> torch.LongTensor:
         self._ensure_prune_buffers()
-        device = self._anchor.device if isinstance(self._anchor, torch.nn.Parameter) else (self._prune_mask.device if self._prune_mask.numel() > 0 else torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
-        if self._anchor_mask_base.numel() == 0:
+        num = self.num_gaussians()
+        if num == 0 or self._level.numel() == 0:
+            device = self._anchor.device if isinstance(self._anchor, torch.nn.Parameter) else (
+                self._prune_mask.device
+                if self._prune_mask.numel() > 0
+                else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            )
             return torch.zeros(0, dtype=torch.long, device=device)
-        return torch.zeros(self.num_gaussians(), dtype=torch.long, device=device)
+
+        device = self._anchor.device
+        level = self._level.squeeze(-1).to(torch.long)
+        if level.shape[0] != num:
+            level = level[:num]
+
+        # Compute integer voxel coordinates for each anchor at its level.  We
+        # quantize anchor positions relative to the octree's initial bounding
+        # box so that anchors that occupy the same logical leaf map to the same
+        # identifier regardless of floating point jitter.
+        base = torch.as_tensor(self.voxel_size, dtype=self._anchor.dtype, device=device)
+        level_float = level.to(self._anchor.dtype)
+        level_scale = torch.pow(torch.full_like(level_float, float(self.fork)), level_float)
+        cell_size = (base / level_scale).unsqueeze(-1)
+        origin = self.init_pos.to(self._anchor.dtype)
+        coords = torch.floor((self._anchor - origin) / cell_size).to(torch.long)
+        key = torch.stack((level, coords[:, 0], coords[:, 1], coords[:, 2]), dim=1)
+        _, inverse = torch.unique(key, dim=0, return_inverse=True)
+        return inverse.to(device)
 
     @property
     def get_level(self):
@@ -284,11 +307,44 @@ class GaussianModel:
         self._growth_frozen = bool(flag)
 
     def leaf_high_variance_mask(self, leaf_ids: torch.LongTensor) -> torch.BoolTensor:
-        num_leaves = int(leaf_ids.max().item() + 1) if leaf_ids.numel() > 0 else 0
-        if num_leaves == 0:
+        if leaf_ids.numel() == 0:
             return torch.zeros(0, dtype=torch.bool, device=leaf_ids.device)
-        # Placeholder: current pipeline does not maintain per-leaf statistics, return all False
-        return torch.zeros(num_leaves, dtype=torch.bool, device=leaf_ids.device)
+
+        num_leaves = int(leaf_ids.max().item() + 1)
+        device = leaf_ids.device
+
+        if self._extra_level.numel() == 0 or self._extra_level.shape[0] < leaf_ids.shape[0]:
+            return torch.zeros(num_leaves, dtype=torch.bool, device=device)
+
+        extra = self._extra_level.to(device)
+        extra = extra[: leaf_ids.shape[0]]
+
+        counts = torch.bincount(leaf_ids, minlength=num_leaves)
+        counts = torch.clamp(counts, min=1)
+        sum_extra = torch.zeros(num_leaves, dtype=extra.dtype, device=device)
+        sum_extra.scatter_add_(0, leaf_ids, extra)
+        sum_sq = torch.zeros_like(sum_extra)
+        sum_sq.scatter_add_(0, leaf_ids, extra * extra)
+
+        counts_f = counts.to(extra.dtype)
+        mean = sum_extra / counts_f
+        var = torch.clamp(sum_sq / counts_f - mean.pow(2), min=0.0)
+
+        multi_samples = counts > 1
+        if multi_samples.any():
+            active_var = var[multi_samples]
+        else:
+            active_var = var
+
+        if active_var.numel() == 0:
+            return torch.zeros(num_leaves, dtype=torch.bool, device=device)
+
+        if active_var.numel() < 4:
+            threshold = active_var.mean()
+        else:
+            threshold = torch.quantile(active_var, 0.85)
+
+        return var >= threshold
 
     @property
     def get_anchor_feat(self):

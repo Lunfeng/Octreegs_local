@@ -230,5 +230,6 @@ class TtfController:
             self.short_finetune(short_iters)
             self.maybe_rollback(r)
         self.model.finalize_prune(self.prune_mask)
+        self._ensure_buffers()
         self.final_finetune(final_iters)
 
