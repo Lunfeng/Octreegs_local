@@ -42,6 +42,9 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+import yaml
+
+from octreegs.pruning.ttf_core import TtfController
 
 # torch.set_num_threads(32)
 lpips_fn = lpips.LPIPS(net='vgg').to('cuda')
@@ -77,6 +80,13 @@ def saveRuntimeCode(dst: str) -> None:
     print('Backup Finished!')
 
 
+def load_ttf_configuration(path: str) -> dict:
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
 def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -88,9 +98,36 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
     scene = Scene(dataset, gaussians, ply_path=ply_path, shuffle=False, logger=logger, resolution_scales=dataset.resolution_scales)
     gaussians.training_setup(opt)
     gaussians.set_coarse_interval(opt.coarse_iter, opt.coarse_factor)
+
+    ttf_cfg_path = os.path.join(Path(__file__).resolve().parent, "configs", "ttf.yaml")
+    ttf_config = load_ttf_configuration(ttf_cfg_path)
+    ttf_controller = None
+    ttf_online_enabled = False
+    ttf_posthoc_enabled = False
+    ttf_online_interval = 0
+    ttf_online_gamma = 0.0
+    ttf_online_alpha_q = 0.6
+    ttf_online_grad_q = 0.6
+    ttf_online_short = 0
+    ttf_preset = "balanced"
+    if ttf_config:
+        ttf_controller = TtfController(gaussians, trainer=None, cfg=ttf_config)
+        ttf_controller.stats_warmup(iters=0)
+        ttf_online_enabled = os.environ.get("OCTREE_TTF_ONLINE", "0") == "1"
+        ttf_posthoc_enabled = os.environ.get("OCTREE_TTF_POSTHOC", "0") == "1"
+        ttf_online_interval = int(os.environ.get("OCTREE_TTF_INTERVAL", "500"))
+        balanced_cfg = ttf_config.get("balanced", {})
+        common_cfg = ttf_config.get("common", {})
+        ttf_online_gamma = float(os.environ.get("OCTREE_TTF_GAMMA", balanced_cfg.get("gamma_iter", 0.275)))
+        ttf_online_alpha_q = float(os.environ.get("OCTREE_TTF_ALPHA_Q", balanced_cfg.get("alpha_q", 0.6)))
+        ttf_online_grad_q = float(os.environ.get("OCTREE_TTF_GRAD_Q", balanced_cfg.get("grad_q", 0.6)))
+        ttf_online_short = int(os.environ.get("OCTREE_TTF_SHORT", common_cfg.get("short_ft_iters", 800)))
+        ttf_preset = os.environ.get("OCTREE_TTF_PRESET", "balanced")
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+        if ttf_controller is not None:
+            ttf_controller.stats_warmup(iters=0)
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -155,6 +192,8 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
 
         loss.backward()
+        if ttf_controller is not None:
+            ttf_controller.observe_after_backward()
 
         iter_end.record()
 
@@ -173,6 +212,24 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             if (iteration in saving_iterations):
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
+
+            if (
+                ttf_controller is not None
+                and ttf_online_enabled
+                and ttf_online_interval > 0
+                and iteration % ttf_online_interval == 0
+                and iteration >= opt.start_stat
+            ):
+                gaussians.freeze_growth(True)
+                schedule = {
+                    "rounds": 1,
+                    "gamma_iter": ttf_online_gamma,
+                    "alpha_q": ttf_online_alpha_q,
+                    "grad_q": ttf_online_grad_q,
+                    "short_ft_iters": ttf_online_short,
+                }
+                ttf_controller.run_online_phase(schedule)
+                gaussians.freeze_growth(False)
 
             # densification
             if iteration < opt.update_until and iteration > opt.start_stat:
@@ -204,6 +261,11 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             if (iteration in checkpoint_iterations):
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
+
+    if ttf_controller is not None and ttf_posthoc_enabled:
+        gaussians.freeze_growth(True)
+        ttf_controller.run_posthoc_phase(preset=ttf_preset)
+        gaussians.freeze_growth(False)
 
 def prepare_output_and_logger(args):
     if not args.model_path:

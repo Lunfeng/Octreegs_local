@@ -96,6 +96,10 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+        # Runtime pruning helpers (initialised lazily once anchors exist)
+        self._prune_mask = torch.empty(0, dtype=torch.bool)
+        self._anchor_mask_base = torch.empty(0, dtype=torch.bool)
+        self._growth_frozen = False
 
         self.offset_gradient_accum = torch.empty(0)
         self.offset_denom = torch.empty(0)
@@ -149,6 +153,34 @@ class GaussianModel:
         if self.appearance_dim > 0:
             self.embedding_appearance.eval()
 
+    def _ensure_prune_buffers(self):
+        if not isinstance(self._anchor, torch.nn.Parameter) or self._anchor.numel() == 0:
+            return
+        device = self._anchor.device
+        num_items = self._anchor.shape[0]
+        if self._prune_mask.numel() != num_items:
+            new_mask = torch.zeros(num_items, dtype=torch.bool, device=device)
+            if self._prune_mask.numel() > 0:
+                copy_len = min(self._prune_mask.shape[0], num_items)
+                new_mask[:copy_len] = self._prune_mask[:copy_len]
+            self._prune_mask = new_mask
+        if self._anchor_mask_base.numel() != num_items:
+            base_mask = torch.ones(num_items, dtype=torch.bool, device=device)
+            if self._anchor_mask_base.numel() > 0:
+                copy_len = min(self._anchor_mask_base.shape[0], num_items)
+                base_mask[:copy_len] = self._anchor_mask_base[:copy_len]
+            self._anchor_mask_base = base_mask
+
+    def _update_anchor_mask(self):
+        self._ensure_prune_buffers()
+        if self._anchor_mask_base.numel() == 0:
+            return
+        combined = self._anchor_mask_base & (~self._prune_mask)
+        if self._anchor_mask.shape != combined.shape:
+            self._anchor_mask = combined.clone()
+        else:
+            self._anchor_mask.copy_(combined)
+
     def train(self):
         self.mlp_opacity.train()
         self.mlp_cov.train()
@@ -187,6 +219,7 @@ class GaussianModel:
         self.training_setup(training_args)
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
+        self._ensure_prune_buffers()
 
     @property
     def get_appearance(self):
@@ -204,6 +237,19 @@ class GaussianModel:
     def get_anchor(self):
         return self._anchor
 
+    def num_gaussians(self) -> int:
+        if not isinstance(self._anchor, torch.nn.Parameter):
+            return 0
+        return self._anchor.shape[0]
+
+    @property
+    def leaf_ids(self) -> torch.LongTensor:
+        self._ensure_prune_buffers()
+        device = self._anchor.device if isinstance(self._anchor, torch.nn.Parameter) else (self._prune_mask.device if self._prune_mask.numel() > 0 else torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
+        if self._anchor_mask_base.numel() == 0:
+            return torch.zeros(0, dtype=torch.long, device=device)
+        return torch.zeros(self.num_gaussians(), dtype=torch.long, device=device)
+
     @property
     def get_level(self):
         return self._level
@@ -215,6 +261,34 @@ class GaussianModel:
     @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
+
+    def set_prune_mask(self, mask: torch.BoolTensor) -> None:
+        mask = mask.to(self._anchor.device)
+        if mask.shape[0] != self.num_gaussians():
+            raise ValueError("Prune mask shape mismatch")
+        self._prune_mask = mask.clone()
+        self._update_anchor_mask()
+
+    def finalize_prune(self, mask: torch.BoolTensor) -> None:
+        mask = mask.to(self._anchor.device)
+        if mask.shape[0] != self.num_gaussians():
+            raise ValueError("Finalize mask shape mismatch")
+        if mask.any():
+            self.prune_anchor(mask)
+        # Reset buffers post compaction
+        self._prune_mask = torch.zeros(self.num_gaussians(), dtype=torch.bool, device=self._anchor.device)
+        self._anchor_mask_base = torch.ones(self.num_gaussians(), dtype=torch.bool, device=self._anchor.device)
+        self._update_anchor_mask()
+
+    def freeze_growth(self, flag: bool) -> None:
+        self._growth_frozen = bool(flag)
+
+    def leaf_high_variance_mask(self, leaf_ids: torch.LongTensor) -> torch.BoolTensor:
+        num_leaves = int(leaf_ids.max().item() + 1) if leaf_ids.numel() > 0 else 0
+        if num_leaves == 0:
+            return torch.zeros(0, dtype=torch.bool, device=leaf_ids.device)
+        # Placeholder: current pipeline does not maintain per-leaf statistics, return all False
+        return torch.zeros(num_leaves, dtype=torch.bool, device=leaf_ids.device)
 
     @property
     def get_anchor_feat(self):
@@ -348,6 +422,8 @@ class GaussianModel:
         self._level = self._level.unsqueeze(dim=1)
         self._extra_level = torch.zeros(self._anchor.shape[0], dtype=torch.float, device="cuda")
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self._prune_mask = torch.zeros(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self._anchor_mask_base = self._anchor_mask.clone()
 
     def map_to_int_level(self, pred_level, cur_level):
         if self.dist2level=='floor':
@@ -394,14 +470,16 @@ class GaussianModel:
             coarse_index = self.levels
 
         int_level = self.map_to_int_level(pred_level, coarse_index - 1)
-        self._anchor_mask = (self._level.squeeze(dim=1) <= int_level)
+        self._anchor_mask_base = (self._level.squeeze(dim=1) <= int_level)
+        self._update_anchor_mask()
 
     def set_anchor_mask_perlevel(self, cam_center, resolution_scale, cur_level):
         anchor_pos = self._anchor + (self.voxel_size/2) / (float(self.fork) ** self._level)
         dist = torch.sqrt(torch.sum((anchor_pos - cam_center)**2, dim=1)) * resolution_scale
         pred_level = torch.log2(self.standard_dist/dist)/math.log2(self.fork) + self._extra_level
         int_level = self.map_to_int_level(pred_level, cur_level)
-        self._anchor_mask = (self._level.squeeze(dim=1) <= int_level)
+        self._anchor_mask_base = (self._level.squeeze(dim=1) <= int_level)
+        self._update_anchor_mask()
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
@@ -429,6 +507,7 @@ class GaussianModel:
             l.append({'params': self.mlp_feature_bank.parameters(), 'lr': training_args.mlp_featurebank_lr_init, "name": "mlp_featurebank"})
 
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self._ensure_prune_buffers()
         self.anchor_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
@@ -585,6 +664,8 @@ class GaussianModel:
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(False))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(False))
         self._anchor_mask = torch.ones(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self._prune_mask = torch.zeros(self._anchor.shape[0], dtype=torch.bool, device="cuda")
+        self._anchor_mask_base = self._anchor_mask.clone()
         self.levels = torch.max(self._level) - torch.min(self._level) + 1
 
     def replace_tensor_to_optimizer(self, tensor, name):
@@ -700,6 +781,8 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
         self._level = self._level[valid_points_mask]
         self._extra_level = self._extra_level[valid_points_mask]
+        self._ensure_prune_buffers()
+        self._update_anchor_mask()
 
     def get_remove_duplicates(self, grid_coords, selected_grid_coords_unique, use_chunk = True):
         if use_chunk:
@@ -715,6 +798,8 @@ class GaussianModel:
         return remove_duplicates
 
     def anchor_growing(self, iteration, grads, threshold, update_ratio, extra_ratio, extra_up, offset_mask):
+        if self._growth_frozen:
+            return
         init_length = self.get_anchor.shape[0]
         grads[~offset_mask] = 0.0
         anchor_grads = torch.sum(grads.reshape(-1, self.n_offsets), dim=-1) / (torch.sum(offset_mask.reshape(-1, self.n_offsets), dim=-1) + 1e-6)
@@ -848,8 +933,12 @@ class GaussianModel:
                 self._opacity = optimizable_tensors["opacity"]
                 self._level = torch.cat([self._level, new_level], dim=0)
                 self._extra_level = torch.cat([self._extra_level, new_extra_level], dim=0)
+                self._ensure_prune_buffers()
+                self._update_anchor_mask()
 
     def adjust_anchor(self, iteration, check_interval=100, success_threshold=0.8, grad_threshold=0.0002, update_ratio=0.5, extra_ratio=4.0, extra_up=0.25, min_opacity=0.005):
+        if self._growth_frozen:
+            return
         # # adding anchors
         grads = self.offset_gradient_accum / self.offset_denom # [N*k, 1]
         grads[grads.isnan()] = 0.0
@@ -902,6 +991,9 @@ class GaussianModel:
 
         if prune_mask.shape[0]>0:
             self.prune_anchor(prune_mask)
+        else:
+            self._ensure_prune_buffers()
+            self._update_anchor_mask()
 
     def save_mlp_checkpoints(self, path, mode = 'split'):#split or unite
         mkdir_p(os.path.dirname(path))
