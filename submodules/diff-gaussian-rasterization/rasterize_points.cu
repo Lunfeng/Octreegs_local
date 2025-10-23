@@ -23,6 +23,7 @@
 #include <fstream>
 #include <string>
 #include <functional>
+#include <vector>
 
 std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
     auto lambda = [&t](size_t N) {
@@ -161,11 +162,11 @@ RasterizeGaussiansCUDA(
   return std::make_tuple(rendered, out_color, radii, final_trans, mask_hit_map, geomBuffer, binningBuffer, imgBuffer);
 }
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::vector<torch::Tensor>
 RasterizeGaussiansBackwardCUDA(
- 	const torch::Tensor& background,
-	const torch::Tensor& means3D,
-	const torch::Tensor& radii,
+        const torch::Tensor& background,
+        const torch::Tensor& means3D,
+        const torch::Tensor& radii,
     const torch::Tensor& colors,
 	const torch::Tensor& scales,
 	const torch::Tensor& rotations,
@@ -239,7 +240,29 @@ RasterizeGaussiansBackwardCUDA(
 	  debug);
   }
 
-  return std::make_tuple(dL_dmeans2D, dL_dcolors, dL_dopacity, dL_dmeans3D, dL_dcov3D, dL_dsh, dL_dscales, dL_drotations);
+  std::vector<torch::Tensor> grad_list;
+  grad_list.reserve(11);
+  grad_list.push_back(dL_dmeans3D);
+  grad_list.push_back(dL_dmeans2D);
+  grad_list.push_back(dL_dsh);
+  grad_list.push_back(dL_dcolors);
+  grad_list.push_back(dL_dopacity);
+  grad_list.push_back(torch::Tensor());
+  grad_list.push_back(torch::Tensor());
+  grad_list.push_back(dL_dscales);
+  grad_list.push_back(dL_drotations);
+  grad_list.push_back(dL_dcov3D);
+  grad_list.push_back(torch::Tensor());
+
+  constexpr int expected_grads = 11;
+  TORCH_CHECK(
+      static_cast<int>(grad_list.size()) == expected_grads,
+      "Backward must return ",
+      expected_grads,
+      " grads, got ",
+      grad_list.size());
+
+  return grad_list;
 }
 
 torch::Tensor 

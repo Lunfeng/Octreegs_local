@@ -62,6 +62,43 @@ class _RasterizeGaussians(torch.autograd.Function):
         raster_settings,
     ):
 
+        if hasattr(ctx, "set_materialize_grads"):
+            ctx.set_materialize_grads(False)
+
+        # Ordered inputs to the CUDA kernel (_C.rasterize_gaussians) with their autograd status:
+        #   0  bg (non-differentiable)
+        #   1  means3D (differentiable)
+        #   2  colors_precomp (differentiable)
+        #   3  opacities (differentiable)
+        #   4  masks (logical, detach)
+        #   5  mask_keep_probabilities (logical, detach)
+        #   6  scales (differentiable)
+        #   7  rotations (differentiable)
+        #   8  scale_modifier (non-differentiable scalar)
+        #   9  cov3Ds_precomp (differentiable)
+        #   10 viewmatrix (non-differentiable)
+        #   11 projmatrix (non-differentiable)
+        #   12 tanfovx (non-differentiable scalar)
+        #   13 tanfovy (non-differentiable scalar)
+        #   14 image_height (non-differentiable int)
+        #   15 image_width (non-differentiable int)
+        #   16 sh (differentiable)
+        #   17 sh_degree (non-differentiable int)
+        #   18 campos (non-differentiable)
+        #   19 prefiltered (non-differentiable bool)
+        #   20 debug (non-differentiable bool)
+        #   21 diagnostics_enable_mask_hitmap (non-differentiable bool)
+        #   22 diagnostics_mask_top_k (non-differentiable int)
+        # Non-differentiable logical inputs such as masks and mask_keep_probabilities must be detached.
+        if masks is None:
+            masks = torch.empty(0, dtype=torch.uint8, device=means3D.device)
+        else:
+            masks = masks.detach()
+        if mask_keep_probabilities is None:
+            mask_keep_probabilities = torch.empty(0, dtype=means3D.dtype, device=means3D.device)
+        else:
+            mask_keep_probabilities = mask_keep_probabilities.detach()
+
         args = (
             raster_settings.bg,
             means3D,
@@ -139,25 +176,50 @@ class _RasterizeGaussians(torch.autograd.Function):
         if raster_settings.debug:
             cpu_args = cpu_deep_copy_tuple(args) # Copy them before they can be corrupted
             try:
-                grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)
+                grad_list = _C.rasterize_gaussians_backward(*args)
             except Exception as ex:
                 torch.save(cpu_args, "snapshot_bw.dump")
                 print("\nAn error occured in backward. Writing snapshot_bw.dump for debugging.\n")
                 raise ex
         else:
-             grad_means2D, grad_colors_precomp, grad_opacities, grad_means3D, grad_cov3Ds_precomp, grad_sh, grad_scales, grad_rotations = _C.rasterize_gaussians_backward(*args)
+             grad_list = _C.rasterize_gaussians_backward(*args)
 
-        grads = (
+        grad_list = tuple(grad_list)
+        expected_inputs = 11
+        if len(grad_list) != expected_inputs:
+            raise RuntimeError(
+                f"Backward must return {expected_inputs} grads, got {len(grad_list)}"
+            )
+
+        def optional_grad(tensor):
+            return tensor if tensor is not None else None
+
+        (
             grad_means3D,
             grad_means2D,
             grad_sh,
             grad_colors_precomp,
             grad_opacities,
-            None,
+            grad_masks,
+            grad_mask_keep_probabilities,
             grad_scales,
             grad_rotations,
             grad_cov3Ds_precomp,
-            None,
+            grad_raster_settings,
+        ) = grad_list
+
+        grads = (
+            optional_grad(grad_means3D),
+            optional_grad(grad_means2D),
+            optional_grad(grad_sh),
+            optional_grad(grad_colors_precomp),
+            optional_grad(grad_opacities),
+            optional_grad(grad_masks),
+            optional_grad(grad_mask_keep_probabilities),
+            optional_grad(grad_scales),
+            optional_grad(grad_rotations),
+            optional_grad(grad_cov3Ds_precomp),
+            optional_grad(grad_raster_settings),
         )
 
         return grads

@@ -13,6 +13,7 @@
 #include <torch/extension.h>
 #include <cstdio>
 #include <tuple>
+#include <vector>
 #include <string>
 #include <cstdint>
 	
@@ -42,11 +43,11 @@ RasterizeGaussiansCUDA(
         const bool enable_mask_hitmap,
         const uint32_t mask_top_k);
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
- RasterizeGaussiansBackwardCUDA(
- 	const torch::Tensor& background,
-	const torch::Tensor& means3D,
-	const torch::Tensor& radii,
+std::vector<torch::Tensor>
+RasterizeGaussiansBackwardCUDA(
+        const torch::Tensor& background,
+        const torch::Tensor& means3D,
+        const torch::Tensor& radii,
  const torch::Tensor& colors,
         const torch::Tensor& scales,
         const torch::Tensor& rotations,
