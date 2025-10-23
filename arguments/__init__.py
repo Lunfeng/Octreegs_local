@@ -10,6 +10,7 @@
 #
 
 from argparse import ArgumentParser, Namespace
+from typing import Optional
 import sys
 import os
 
@@ -19,31 +20,51 @@ class GroupParams:
 
 
 class ParamGroup:
-    def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
+    def __init__(self, parser: ArgumentParser, name: str, fill_none=False, arg_prefix: Optional[str] = None):
+        prefix = (arg_prefix or "").strip()
+        if prefix and not prefix.endswith('.'):
+            prefix = prefix + '.'
+        dest_prefix = prefix.replace('.', '_')
+        if dest_prefix and not dest_prefix.endswith('_'):
+            dest_prefix = dest_prefix + '_'
+
+        arg_dest_map = {}
         group = parser.add_argument_group(name)
         for key, value in vars(self).items():
             shorthand = False
             if key.startswith("_"):
                 shorthand = True
                 key = key[1:]
-            t = type(value)
-            value = value if not fill_none else None
+
+            option_strings = ["--" + (prefix + key if prefix else key)]
             if shorthand:
-                if t == bool:
-                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, action="store_true")
-                else:
-                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, type=t)
+                option_strings.append("-" + key[0:1])
+
+            dest_name = (dest_prefix + key) if dest_prefix else key
+            arg_dest_map[dest_name] = key
+
+            value_default = value if not fill_none else None
+            value_type = type(value)
+
+            if isinstance(value, list):
+                elem_type = type(value[0]) if len(value) > 0 else str
+                group.add_argument(*option_strings, dest=dest_name, default=value_default, nargs='+', type=elem_type)
+            elif value_type == bool:
+                group.add_argument(*option_strings, dest=dest_name, default=value_default, action="store_true")
             else:
-                if t == bool:
-                    group.add_argument("--" + key, default=value, action="store_true")
-                else:
-                    group.add_argument("--" + key, default=value, type=t)
+                group.add_argument(*option_strings, dest=dest_name, default=value_default, type=value_type)
+
+        self._arg_dest_map = arg_dest_map
+        self._arg_prefix = prefix
+        self._dest_prefix = dest_prefix
 
     def extract(self, args):
         group = GroupParams()
-        for arg in vars(args).items():
-            if arg[0] in vars(self) or ("_" + arg[0]) in vars(self):
-                setattr(group, arg[0], arg[1])
+        for dest, value in vars(args).items():
+            if dest in getattr(self, "_arg_dest_map", {}):
+                setattr(group, self._arg_dest_map[dest], value)
+            elif dest in vars(self) or ("_" + dest) in vars(self):
+                setattr(group, dest, value)
         return group
 
 
@@ -167,6 +188,81 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
 
         super().__init__(parser, "Optimization Parameters")
+
+
+class PruningMaskTempParams(ParamGroup):
+    def __init__(self, parser):
+        self.init = 1.0
+        self.final = 0.4
+        self.anneal_portion = 0.6
+        super().__init__(parser, "Pruning Mask Temperature", arg_prefix="pruning.mask.temp")
+
+
+class PruningMaskSchedulerParams(ParamGroup):
+    def __init__(self, parser):
+        self.phase_breakpoints = [0.3, 0.7]
+        self.phase_weights = [1.0, 1.0, 1.0]
+        super().__init__(parser, "Pruning Mask Scheduler", arg_prefix="pruning.mask.scheduler")
+
+
+class PruningMaskDiagnosticsParams(ParamGroup):
+    def __init__(self, parser):
+        self.log_interval = 1000
+        self.mask_hitmap_export = False
+        self.mask_hitmap_interval = 1000
+        self.mask_hitmap_top_k = 4
+        self.mask_hitmap_dir = "mask_hitmap"
+        self.transmittance_export = False
+        self.transmittance_interval = 1000
+        self.transmittance_dir = "transmittance_heatmap"
+        self.inspection_views = []
+        self.inspection_dir = "inspection_views"
+        self.inspection_rng_seed = 1337
+        super().__init__(parser, "Pruning Mask Diagnostics", arg_prefix="pruning.mask.diagnostics")
+
+
+class PruningMaskParams(ParamGroup):
+    def __init__(self, parser):
+        self.enabled = False
+        self.lambda_m = 0.0
+        self.sample_trials = 10
+        self.global_interval = 1000
+        self.newborn_protect_cycles = 2
+        self.remove_rule = "all_zero"
+        self.sampler = "gumbel"
+        self.regularizer = "l2"
+        self.remove_hits_window = 3
+        self.remove_hits_threshold = 0
+        super().__init__(parser, "Pruning Mask Parameters", arg_prefix="pruning.mask")
+
+        self._temp_params = PruningMaskTempParams(parser)
+        self._scheduler_params = PruningMaskSchedulerParams(parser)
+        self._diagnostics_params = PruningMaskDiagnosticsParams(parser)
+
+    def extract(self, args):
+        mask_group = super().extract(args)
+        mask_group.temp = self._temp_params.extract(args)
+        mask_group.scheduler = self._scheduler_params.extract(args)
+        mask_group.diagnostics = self._diagnostics_params.extract(args)
+        return mask_group
+
+
+class PruningLegacyParams(ParamGroup):
+    def __init__(self, parser):
+        self.enabled_when_mask = False
+        super().__init__(parser, "Pruning Legacy Parameters", arg_prefix="pruning.legacy")
+
+
+class PruningParams:
+    def __init__(self, parser):
+        self.mask = PruningMaskParams(parser)
+        self.legacy = PruningLegacyParams(parser)
+
+    def extract(self, args):
+        pruning_group = GroupParams()
+        pruning_group.mask = self.mask.extract(args)
+        pruning_group.legacy = self.legacy.extract(args)
+        return pruning_group
 
 
 def get_combined_args(parser: ArgumentParser):

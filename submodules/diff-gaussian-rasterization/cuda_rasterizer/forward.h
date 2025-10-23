@@ -17,6 +17,7 @@
 #include "device_launch_parameters.h"
 #define GLM_FORCE_CUDA
 #include <glm/glm.hpp>
+#include <cstdint>
 
 namespace FORWARD
 {
@@ -48,18 +49,23 @@ namespace FORWARD
 		bool prefiltered);
 
 	// Main rasterization method.
-	void render(
-		const dim3 grid, dim3 block,
-		const uint2* ranges,
-		const uint32_t* point_list,
-		int W, int H,
-		const float2* points_xy_image,
-		const float* features,
-		const float4* conic_opacity,
-		float* final_T,
-		uint32_t* n_contrib,
-		const float* bg_color,
-		float* out_color);
+        void render(
+                const dim3 grid, dim3 block,
+                const uint2* ranges,
+                const uint32_t* point_list,
+                int W, int H,
+                const float2* points_xy_image,
+                const float* features,
+                const float4* conic_opacity,
+                float* final_T,
+                uint32_t* n_contrib,
+                const float* bg_color,
+                float* out_color,
+                const uint8_t* masks,
+                uint8_t masks_provided,
+                const float* mask_keep_probabilities,
+                uint32_t mask_top_k,
+                float* mask_hit_output);
 	void filter_preprocess(int P, int M,
 		const float* means3D,
 		const glm::vec3* scales,

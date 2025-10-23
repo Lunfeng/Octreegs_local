@@ -11,6 +11,7 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+#include <assert.h>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -347,18 +348,20 @@ __global__ void filter_preprocessCUDA(int P, int M,
 template <uint32_t CHANNELS>
 __global__ void __launch_bounds__(BLOCK_X * BLOCK_Y)
 renderCUDA(
-	const uint2* __restrict__ ranges,
-	const uint32_t* __restrict__ point_list,
-	int W, int H,
-	const float2* __restrict__ points_xy_image,
-	const float* __restrict__ features,
-	const float4* __restrict__ conic_opacity,
-	float* __restrict__ final_T,
-	uint32_t* __restrict__ n_contrib,
-	const float* __restrict__ bg_color,
-	float* __restrict__ out_color,
-	const float* __restrict__ depth,
-	float* __restrict__ out_depth)
+        const uint2* __restrict__ ranges,
+        const uint32_t* __restrict__ point_list,
+        int W, int H,
+        const float2* __restrict__ points_xy_image,
+        const float* __restrict__ features,
+        const float4* __restrict__ conic_opacity,
+        float* __restrict__ final_T,
+        uint32_t* __restrict__ n_contrib,
+        const float* __restrict__ bg_color,
+        float* __restrict__ out_color,
+        const float* __restrict__ depth,
+        float* __restrict__ out_depth,
+        const uint8_t* __restrict__ masks,
+        uint8_t masks_provided)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -381,9 +384,10 @@ renderCUDA(
 
 	// Allocate storage for batches of collectively fetched data.
 	__shared__ int collected_id[BLOCK_SIZE];
-	__shared__ float2 collected_xy[BLOCK_SIZE];
-	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
-	__shared__ float collected_depth[BLOCK_SIZE];
+        __shared__ float2 collected_xy[BLOCK_SIZE];
+        __shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+        __shared__ float collected_depth[BLOCK_SIZE];
+        __shared__ uint8_t collected_masks[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -402,14 +406,15 @@ renderCUDA(
 
 		// Collectively fetch per-Gaussian data from global to shared
 		int progress = i * BLOCK_SIZE + block.thread_rank();
-		if (range.x + progress < range.y)
-		{
-			int coll_id = point_list[range.x + progress];
-			collected_id[block.thread_rank()] = coll_id;
-			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
-			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
-			collected_depth[block.thread_rank()] = depth[coll_id];
-		}
+                if (range.x + progress < range.y)
+                {
+                        int coll_id = point_list[range.x + progress];
+                        collected_id[block.thread_rank()] = coll_id;
+                        collected_xy[block.thread_rank()] = points_xy_image[coll_id];
+                        collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+                        collected_depth[block.thread_rank()] = depth[coll_id];
+                        collected_masks[block.thread_rank()] = masks_provided ? masks[range.x + progress] : 1u;
+                }
 		block.sync();
 
 		// Iterate over current batch
@@ -432,26 +437,43 @@ renderCUDA(
 			// and its exponential falloff from mean.
 			// Avoid numerical instabilities (see paper appendix). 
 			// float det = 
-			float alpha = min(0.99f, con_o.w * exp(power));
-			if (alpha < 1.0f / 255.0f)
-				continue;
-			float test_T = T * (1 - alpha);
-			if (test_T < 0.0001f)
-			{
-				done = true;
-				continue;
-			}
+                        float alpha = fminf(0.995f, con_o.w * exp(power));
+                        assert(isfinite(alpha));
+                        if (alpha < 1.0f / 255.0f)
+                                continue;
+                        const uint8_t mask_bit = masks_provided ? collected_masks[j] : 1u;
+                        const float mask_value = static_cast<float>(mask_bit);
+                        float updated_T = T;
+                        if (mask_bit)
+                        {
+                                updated_T = T * (1.0f - alpha);
+                                assert(isfinite(updated_T));
+                                if (updated_T < 0.0001f)
+                                {
+                                        T = fmaxf(updated_T, 1e-6f);
+                                        assert(isfinite(T));
+                                        if (T < 1e-3f)
+                                                done = true;
+                                        continue;
+                                }
+                        }
 
-			// Eq. (3) from 3D Gaussian splatting paper.
-			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+                        // Eq. (3) from 3D Gaussian splatting paper.
+                        for (int ch = 0; ch < CHANNELS; ch++)
+                                C[ch] += mask_value * features[collected_id[j] * CHANNELS + ch] * alpha * T;
 
-			float dep = collected_depth[j];
-            D += dep * alpha * T;
+                        float dep = collected_depth[j];
+            D += mask_value * dep * alpha * T;
 
-			T = test_T;
+                        if (mask_bit)
+                                T = updated_T;
 
-			// Keep track of last range entry to update this
+                        T = fmaxf(T, 1e-6f);
+                        assert(isfinite(T));
+                        if (T < 1e-3f)
+                                done = true;
+
+                        // Keep track of last range entry to update this
 			// pixel.
 			last_contributor = contributor;
 		}
@@ -471,33 +493,37 @@ renderCUDA(
 }
 
 void FORWARD::render(
-	const dim3 grid, dim3 block,
-	const uint2* ranges,
-	const uint32_t* point_list,
-	int W, int H,
-	const float2* means2D,
-	const float* colors,
-	const float4* conic_opacity,
-	float* final_T,
-	uint32_t* n_contrib,
-	const float* bg_color,
-	float* out_color,
-	const float* depth,
-	float* out_depth)
+        const dim3 grid, dim3 block,
+        const uint2* ranges,
+        const uint32_t* point_list,
+        int W, int H,
+        const float2* means2D,
+        const float* colors,
+        const float4* conic_opacity,
+        float* final_T,
+        uint32_t* n_contrib,
+        const float* bg_color,
+        float* out_color,
+        const float* depth,
+        float* out_depth,
+        const uint8_t* masks,
+        uint8_t masks_provided)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
-		ranges,
-		point_list,
-		W, H,
-		means2D,
-		colors,
-		conic_opacity,
-		final_T,
-		n_contrib,
-		bg_color,
-		out_color,
-		depth,
-		out_depth);
+        renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+                ranges,
+                point_list,
+                W, H,
+                means2D,
+                colors,
+                conic_opacity,
+                final_T,
+                n_contrib,
+                bg_color,
+                out_color,
+                depth,
+                out_depth,
+                masks,
+                masks_provided);
 }
 
 void FORWARD::preprocess(int P, int D, int M,

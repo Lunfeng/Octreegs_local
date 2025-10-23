@@ -34,25 +34,29 @@ std::function<char*(size_t N)> resizeFunctional(torch::Tensor& t) {
 
 std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 RasterizeGaussiansCUDA(
-	const torch::Tensor& background,
-	const torch::Tensor& means3D,
+        const torch::Tensor& background,
+        const torch::Tensor& means3D,
     const torch::Tensor& colors,
     const torch::Tensor& opacity,
-	const torch::Tensor& scales,
-	const torch::Tensor& rotations,
-	const float scale_modifier,
-	const torch::Tensor& cov3D_precomp,
-	const torch::Tensor& viewmatrix,
+        const torch::Tensor& masks,
+        const torch::Tensor& mask_keep_probabilities,
+        const torch::Tensor& scales,
+        const torch::Tensor& rotations,
+        const float scale_modifier,
+        const torch::Tensor& cov3D_precomp,
+        const torch::Tensor& viewmatrix,
 	const torch::Tensor& projmatrix,
 	const float tan_fovx, 
 	const float tan_fovy,
     const int image_height,
     const int image_width,
-	const torch::Tensor& sh,
-	const int degree,
-	const torch::Tensor& campos,
-	const bool prefiltered,
-	const bool debug)
+        const torch::Tensor& sh,
+        const int degree,
+        const torch::Tensor& campos,
+        const bool prefiltered,
+        const bool debug,
+        const bool enable_mask_hitmap,
+        const uint32_t mask_top_k)
 {
   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
     AT_ERROR("means3D must have dimensions (num_points, 3)");
@@ -73,6 +77,9 @@ RasterizeGaussiansCUDA(
   torch::Tensor geomBuffer = torch::empty({0}, options.device(device));
   torch::Tensor binningBuffer = torch::empty({0}, options.device(device));
   torch::Tensor imgBuffer = torch::empty({0}, options.device(device));
+  torch::Tensor final_trans = torch::empty({H, W}, float_opts);
+  final_trans.fill_(1.0f);
+  torch::Tensor mask_hit_map;
   std::function<char*(size_t)> geomFunc = resizeFunctional(geomBuffer);
   std::function<char*(size_t)> binningFunc = resizeFunctional(binningBuffer);
   std::function<char*(size_t)> imgFunc = resizeFunctional(imgBuffer);
@@ -86,32 +93,72 @@ RasterizeGaussiansCUDA(
 		M = sh.size(1);
       }
 
-	  rendered = CudaRasterizer::Rasterizer::forward(
-	    geomFunc,
-		binningFunc,
-		imgFunc,
-	    P, degree, M,
-		background.contiguous().data<float>(),
-		W, H,
-		means3D.contiguous().data<float>(),
-		sh.contiguous().data_ptr<float>(),
-		colors.contiguous().data<float>(), 
-		opacity.contiguous().data<float>(), 
-		scales.contiguous().data_ptr<float>(),
-		scale_modifier,
-		rotations.contiguous().data_ptr<float>(),
-		cov3D_precomp.contiguous().data<float>(), 
-		viewmatrix.contiguous().data<float>(), 
-		projmatrix.contiguous().data<float>(),
-		campos.contiguous().data<float>(),
-		tan_fovx,
-		tan_fovy,
-		prefiltered,
-		out_color.contiguous().data<float>(),
-		radii.contiguous().data<int>(),
-		debug);
+          const bool has_masks = masks.numel() == P;
+          torch::Tensor mask_tensor = masks;
+          if (has_masks)
+          {
+                if (masks.dtype() != torch::kUInt8)
+                {
+                        mask_tensor = masks.to(torch::kUInt8);
+                }
+                mask_tensor = mask_tensor.contiguous();
+          }
+          const uint8_t* mask_ptr = has_masks ? mask_tensor.data_ptr<uint8_t>() : nullptr;
+
+          const bool keep_prob_available = mask_keep_probabilities.numel() == P;
+          torch::Tensor keep_tensor = mask_keep_probabilities;
+          if (keep_prob_available)
+          {
+                if (mask_keep_probabilities.dtype() != torch::kFloat32)
+                {
+                        keep_tensor = mask_keep_probabilities.to(torch::kFloat32);
+                }
+                keep_tensor = keep_tensor.contiguous();
+          }
+          const float* keep_ptr = keep_prob_available ? keep_tensor.data_ptr<float>() : nullptr;
+
+          const bool record_mask_hitmap = enable_mask_hitmap && mask_top_k > 0 && keep_ptr != nullptr;
+          if (record_mask_hitmap)
+          {
+                mask_hit_map = torch::zeros({H, W}, float_opts);
+          }
+          else
+          {
+                mask_hit_map = torch::empty({0}, float_opts);
+          }
+
+          rendered = CudaRasterizer::Rasterizer::forward(
+            geomFunc,
+                binningFunc,
+                imgFunc,
+            P, degree, M,
+                background.contiguous().data<float>(),
+                W, H,
+                means3D.contiguous().data<float>(),
+                sh.contiguous().data_ptr<float>(),
+                colors.contiguous().data<float>(),
+                opacity.contiguous().data<float>(),
+                mask_ptr,
+                has_masks,
+                keep_ptr,
+                record_mask_hitmap ? mask_top_k : 0u,
+                scales.contiguous().data_ptr<float>(),
+                scale_modifier,
+                rotations.contiguous().data_ptr<float>(),
+                cov3D_precomp.contiguous().data<float>(),
+                viewmatrix.contiguous().data<float>(),
+                projmatrix.contiguous().data<float>(),
+                campos.contiguous().data<float>(),
+                tan_fovx,
+                tan_fovy,
+                prefiltered,
+                out_color.contiguous().data<float>(),
+                radii.contiguous().data<int>(),
+                debug,
+                final_trans.contiguous().data<float>(),
+                record_mask_hitmap ? mask_hit_map.contiguous().data_ptr<float>() : nullptr);
   }
-  return std::make_tuple(rendered, out_color, radii, geomBuffer, binningBuffer, imgBuffer);
+  return std::make_tuple(rendered, out_color, radii, final_trans, mask_hit_map, geomBuffer, binningBuffer, imgBuffer);
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>

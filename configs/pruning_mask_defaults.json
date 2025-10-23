@@ -1,0 +1,48 @@
+{
+  "pruning": {
+    "mask": {
+      "enabled": false,
+      "lambda_m": 0.0,
+      "temp": {
+        "init": 1.0,
+        "final": 0.4,
+        "anneal_portion": 0.6
+      },
+      "sample_trials": 10,
+      "global_interval": 1000,
+      "newborn_protect_cycles": 2,
+      "remove_rule": "all_zero",
+      "sampler": "gumbel",
+      "regularizer": "l2",
+      "remove_hits_window": 3,
+      "remove_hits_threshold": 0,
+      "diagnostics": {
+        "log_interval": 1000,
+        "mask_hitmap_export": false,
+        "mask_hitmap_interval": 1000,
+        "mask_hitmap_top_k": 4,
+        "mask_hitmap_dir": "mask_hitmap",
+        "transmittance_export": false,
+        "transmittance_interval": 1000,
+        "transmittance_dir": "transmittance_heatmap",
+        "inspection_views": [],
+        "inspection_dir": "inspection_views",
+        "inspection_rng_seed": 1337
+      },
+      "scheduler": {
+        "phase_breakpoints": [
+          0.3,
+          0.7
+        ],
+        "phase_weights": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    },
+    "legacy": {
+      "enabled_when_mask": false
+    }
+  }
+}
