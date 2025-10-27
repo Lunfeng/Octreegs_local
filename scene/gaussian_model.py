@@ -10,6 +10,7 @@
 #
 
 import time
+import logging
 from datetime import timedelta
 import torch
 from functools import reduce
@@ -28,6 +29,8 @@ from einops import repeat
 import math
 
 class GaussianModel:
+
+    logger = logging.getLogger(__name__)
 
     def setup_functions(self):
         def build_covariance_from_scaling_rotation(scaling, scaling_modifier, rotation):
@@ -106,6 +109,7 @@ class GaussianModel:
         self.percent_dense = 0
         self.spatial_lr_scale = 0
         self.setup_functions()
+        self.checkpoint_dir = None
 
         self.opacity_dist_dim = 1 if self.add_opacity_dist else 0
         self.cov_dist_dim = 1 if self.add_cov_dist else 0
@@ -187,6 +191,8 @@ class GaussianModel:
         self.training_setup(training_args)
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
+        if self.checkpoint_dir:
+            self.maybe_load_vq_anchor_feat(self.checkpoint_dir)
 
     @property
     def get_appearance(self):
@@ -628,6 +634,61 @@ class GaussianModel:
                 optimizable_tensors[group["name"]] = group["params"][0]
 
         return optimizable_tensors
+
+    def maybe_load_vq_anchor_feat(self, ckpt_dir: str):
+        if not ckpt_dir:
+            return False
+        vq_path = os.path.join(ckpt_dir, "vq_anchor_feat.npz")
+        if not os.path.exists(vq_path):
+            return False
+        try:
+            data = np.load(vq_path)
+        except Exception as exc:  # pylint: disable=broad-except
+            self.logger.warning("Failed to load VQ file %s: %s", vq_path, exc)
+            return False
+
+        keep_mask = data.get("keep_mask")
+        indices = data.get("indices")
+        codebook = data.get("codebook")
+        if keep_mask is None or indices is None or codebook is None:
+            self.logger.warning("VQ file %s missing required fields", vq_path)
+            return False
+
+        keep_mask = keep_mask.astype(bool)
+        if keep_mask.shape[0] != self._anchor_feat.shape[0]:
+            self.logger.warning(
+                "VQ keep_mask size mismatch (%d vs %d)",
+                keep_mask.shape[0],
+                self._anchor_feat.shape[0],
+            )
+            return False
+
+        quant_positions = np.nonzero(~keep_mask)[0]
+        if quant_positions.shape[0] != indices.shape[0]:
+            self.logger.warning(
+                "VQ indices mismatch: %d vs %d",
+                quant_positions.shape[0],
+                indices.shape[0],
+            )
+            return False
+
+        if codebook.shape[0] == 0 or indices.shape[0] == 0:
+            self.logger.info("VQ file %s indicates no quantized anchors", vq_path)
+            return False
+
+        codebook_tensor = torch.from_numpy(codebook).to(self._anchor_feat.device, dtype=self._anchor_feat.dtype)
+        index_tensor = torch.from_numpy(indices).to(self._anchor_feat.device, dtype=torch.long)
+        anchor_indices = torch.from_numpy(quant_positions).to(self._anchor_feat.device, dtype=torch.long)
+
+        self._anchor_feat[anchor_indices] = codebook_tensor[index_tensor]
+        coverage = quant_positions.shape[0] / float(keep_mask.shape[0])
+        self.logger.info(
+            "Loaded VQ anchor features from %s (quantized %.2f%%, codebook=%d)",
+            vq_path,
+            coverage * 100.0,
+            codebook_tensor.shape[0],
+        )
+        return True
 
 
     # statis grad information to guide liftting.

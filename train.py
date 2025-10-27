@@ -77,7 +77,61 @@ def saveRuntimeCode(dst: str) -> None:
     print('Backup Finished!')
 
 
-def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
+def _find_model_root(path: str) -> str:
+    cur = os.path.abspath(path)
+    if os.path.isfile(cur):
+        cur = os.path.dirname(cur)
+    while True:
+        cfg = os.path.join(cur, "cfg_args")
+        if os.path.exists(cfg):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            raise FileNotFoundError(f"Unable to locate cfg_args near {path}")
+        cur = parent
+
+
+def _load_cfg_namespace(model_root: str):
+    with open(os.path.join(model_root, "cfg_args"), "r", encoding="utf-8") as fp:
+        return eval(fp.read())
+
+
+def _resolve_resume_checkpoint(root: str) -> str:
+    preferred = os.path.join(root, "pruned_checkpoint.pth")
+    if os.path.exists(preferred):
+        return preferred
+    candidates = [
+        os.path.join(root, f)
+        for f in os.listdir(root)
+        if f.startswith("chkpnt") and f.endswith(".pth")
+    ]
+    return sorted(candidates)[-1] if candidates else ""
+
+
+def _merge_resume_config(args, parser):
+    if not args.resume:
+        return None
+    resume_root = _find_model_root(args.resume)
+    cfg_ns = _load_cfg_namespace(resume_root)
+    for key, value in vars(cfg_ns).items():
+        if not hasattr(args, key):
+            continue
+        current = getattr(args, key)
+        default = parser.get_default(key)
+        if current == default or current is None:
+            setattr(args, key, value)
+    if not args.model_path:
+        args.model_path = resume_root
+    if os.path.isdir(args.resume):
+        candidate = _resolve_resume_checkpoint(args.resume)
+    else:
+        candidate = args.resume
+    if candidate and not args.start_checkpoint:
+        args.start_checkpoint = candidate
+    return resume_root
+
+
+def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None, finetune_cfg=None):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(
@@ -85,12 +139,19 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         dataset.add_opacity_dist, dataset.add_cov_dist, dataset.add_color_dist, dataset.add_level,
         dataset.visible_threshold, dataset.dist2level, dataset.base_layer, dataset.progressive, dataset.extend
     )
+    gaussians.checkpoint_dir = dataset.model_path
     scene = Scene(dataset, gaussians, ply_path=ply_path, shuffle=False, logger=logger, resolution_scales=dataset.resolution_scales)
     gaussians.training_setup(opt)
     gaussians.set_coarse_interval(opt.coarse_iter, opt.coarse_factor)
     if checkpoint:
+        if os.path.isfile(checkpoint):
+            gaussians.checkpoint_dir = os.path.dirname(checkpoint)
+        else:
+            gaussians.checkpoint_dir = checkpoint
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
+    else:
+        gaussians.maybe_load_vq_anchor_feat(gaussians.checkpoint_dir)
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -118,7 +179,20 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
 
         iter_start.record()
 
-        gaussians.update_learning_rate(iteration)
+        if finetune_cfg:
+            freeze_iters = finetune_cfg["freeze_iters"]
+            for group in gaussians.optimizer.param_groups:
+                name = group.get("name", "")
+                if name in {"anchor", "scaling", "rotation"}:
+                    group['lr'] = 0.0 if iteration <= freeze_iters else finetune_cfg["pos_lr_after"]
+                elif name == "offset":
+                    group['lr'] = 0.0 if iteration <= freeze_iters else finetune_cfg["offset_lr_after"]
+                elif name in {"mlp_color", "mlp_cov", "anchor_feat"}:
+                    group['lr'] = finetune_cfg["mlp_color_lr"]
+                elif name in {"mlp_opacity", "opacity"}:
+                    group['lr'] = finetune_cfg["mlp_opacity_lr"]
+        else:
+            gaussians.update_learning_rate(iteration)
 
         if dataset.random_background:
             bg_color = [np.random.random(),np.random.random(),np.random.random()]
@@ -170,6 +244,20 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
 
             # Log and save
             training_report(tb_writer, dataset_name, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), wandb, logger)
+            if iteration == first_iter or iteration % 200 == 0:
+                with torch.no_grad():
+                    cur_psnr = psnr(image, gt_image).item()
+                    cur_ssim = 1.0 - ssim_loss.item()
+                    cur_lpips = lpips_fn(image, gt_image).item()
+                lr_state = {group.get('name', f'g{idx}'): group['lr'] for idx, group in enumerate(gaussians.optimizer.param_groups)}
+                logger.info(
+                    "[ITER %d] PSNR %.3f SSIM %.4f LPIPS %.4f LR %s",
+                    iteration,
+                    cur_psnr,
+                    cur_ssim,
+                    cur_lpips,
+                    lr_state,
+                )
             if (iteration in saving_iterations):
                 logger.info("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -497,8 +585,21 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--finetune", action="store_true", default=False)
+    parser.add_argument("--finetune_iters", type=int, default=5000)
+    parser.add_argument("--freeze_iters", type=int, default=2000)
+    parser.add_argument("--mlp_color_lr", type=float, default=1e-4)
+    parser.add_argument("--mlp_opacity_lr", type=float, default=1e-4)
+    parser.add_argument("--pos_lr_after", type=float, default=1e-4)
+    parser.add_argument("--offset_lr_after", type=float, default=5e-5)
     parser.add_argument("--gpu", type=str, default = '-1')
     args = parser.parse_args(sys.argv[1:])
+
+    _merge_resume_config(args, parser)
+
+    if args.finetune:
+        args.iterations = args.finetune_iters
 
     # enable logging
     model_path = args.model_path
@@ -557,12 +658,29 @@ if __name__ == "__main__":
 
     # record start time
     start_time = time.time()
+    model_params = lp.extract(args)
+    opt_params = op.extract(args)
+    pipe_params = pp.extract(args)
+
+    finetune_cfg = None
+    if args.finetune:
+        finetune_cfg = {
+            "freeze_iters": args.freeze_iters,
+            "mlp_color_lr": args.mlp_color_lr,
+            "mlp_opacity_lr": args.mlp_opacity_lr,
+            "pos_lr_after": args.pos_lr_after,
+            "offset_lr_after": args.offset_lr_after,
+        }
+        opt_params.iterations = args.finetune_iters
+        opt_params.update_anchor = False
+        opt_params.update_until = 0
+
     # training
-    training(lp.extract(args), op.extract(args), pp.extract(args), dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb, logger)
+    training(model_params, opt_params, pipe_params, dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb, logger, finetune_cfg=finetune_cfg)
     if args.warmup:
         logger.info("\n Warmup finished! Reboot from last checkpoints")
         new_ply_path = os.path.join(args.model_path, f'point_cloud/iteration_{args.iterations}', 'point_cloud.ply')
-        training(lp.extract(args), op.extract(args), pp.extract(args), dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb=wandb, logger=logger, ply_path=new_ply_path)
+        training(model_params, opt_params, pipe_params, dataset,  args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, wandb=wandb, logger=logger, ply_path=new_ply_path, finetune_cfg=finetune_cfg)
 
     # All done
     logger.info(f"\nTraining complete. Total time: {time.time() - start_time:.2f} seconds.")
@@ -570,9 +688,9 @@ if __name__ == "__main__":
     # rendering
     logger.info(f'\nStarting Rendering~')
     if args.eval:
-        visible_count = render_sets(lp.extract(args), -1, pp.extract(args), skip_train=True, skip_test=False, wandb=wandb, logger=logger)
+        visible_count = render_sets(model_params, -1, pipe_params, skip_train=True, skip_test=False, wandb=wandb, logger=logger)
     else:
-        visible_count = render_sets(lp.extract(args), -1, pp.extract(args), skip_train=False, skip_test=True, wandb=wandb, logger=logger)
+        visible_count = render_sets(model_params, -1, pipe_params, skip_train=False, skip_test=True, wandb=wandb, logger=logger)
     logger.info("\nRendering complete.")
 
     # calc metrics
