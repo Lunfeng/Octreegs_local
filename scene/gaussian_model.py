@@ -701,6 +701,15 @@ class GaussianModel:
         self._level = self._level[valid_points_mask]
         self._extra_level = self._extra_level[valid_points_mask]
 
+    def prune_points(self, mask):
+        mask = mask.view(-1)
+        if mask.dtype != torch.bool:
+            mask = mask.to(dtype=torch.bool)
+        device = self._anchor.device
+        if mask.device != device:
+            mask = mask.to(device)
+        self.prune_anchor(mask)
+
     def get_remove_duplicates(self, grid_coords, selected_grid_coords_unique, use_chunk = True):
         if use_chunk:
             chunk_size = 4096
