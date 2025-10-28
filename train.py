@@ -77,6 +77,29 @@ def saveRuntimeCode(dst: str) -> None:
     print('Backup Finished!')
 
 
+def apply_spa_preset_options(args: Namespace, parser: ArgumentParser) -> str:
+    valid_presets = {"off", "minimal", "full"}
+    preset_raw = getattr(args, "spa_preset", "off")
+    preset = str(preset_raw).lower()
+    if preset not in valid_presets:
+        parser.error(
+            f"--spa_preset must be one of {sorted(valid_presets)} (got '{preset_raw}')"
+        )
+
+    setattr(args, "spa_preset", preset)
+    if preset == "off":
+        setattr(args, "spa_enable", False)
+        setattr(args, "spa_keep_densify", False)
+    elif preset == "minimal":
+        setattr(args, "spa_enable", True)
+        setattr(args, "spa_keep_densify", False)
+    else:
+        setattr(args, "spa_enable", True)
+        setattr(args, "spa_keep_densify", True)
+
+    return preset
+
+
 def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, wandb=None, logger=None, ply_path=None):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -88,6 +111,143 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
     scene = Scene(dataset, gaussians, ply_path=ply_path, shuffle=False, logger=logger, resolution_scales=dataset.resolution_scales)
     gaussians.training_setup(opt)
     gaussians.set_coarse_interval(opt.coarse_iter, opt.coarse_factor)
+
+    log_fn = logger.info if logger is not None else print
+
+    spa_preset = getattr(opt, "spa_preset", "off")
+    spa_enabled = bool(getattr(opt, "spa_enable", False))
+    spa_keep_densify = bool(getattr(opt, "spa_keep_densify", False))
+
+    raw_kappa_total = getattr(opt, "kappa_total", None)
+    raw_keep_ratio = getattr(opt, "keep_ratio", None)
+    kappa_total = (
+        int(raw_kappa_total)
+        if raw_kappa_total is not None and raw_kappa_total > 0
+        else None
+    )
+    keep_ratio = (
+        float(raw_keep_ratio)
+        if raw_keep_ratio is not None and raw_keep_ratio > 0
+        else None
+    )
+
+    log_dir = getattr(dataset, "model_path", None)
+    exp_name = None
+    if log_dir is not None:
+        try:
+            exp_name = Path(log_dir).name
+        except Exception:
+            exp_name = None
+    if exp_name is None:
+        exp_name = dataset_name
+
+    if kappa_total is not None:
+        target_desc = f"kappa_total={kappa_total}"
+    elif keep_ratio is not None:
+        target_desc = f"keep_ratio={keep_ratio}"
+    else:
+        target_desc = "kappa_total=None"
+
+    log_fn(
+        f"[SPA] preset={spa_preset} enable={spa_enabled} keep_densify={spa_keep_densify} "
+        f"start={opt.spa_start_iter} stop={opt.spa_stop_iter} "
+        f"delta=[{opt.spa_delta_start}, {opt.spa_delta_end}] "
+        f"interval=[{opt.spa_interval_warm}, {opt.spa_interval_stable}] {target_desc}"
+    )
+
+    spa_run_meta = {
+        "preset": spa_preset,
+        "enable": spa_enabled,
+        "keep_densify": spa_keep_densify,
+        "spa_start_iter": opt.spa_start_iter,
+        "spa_stop_iter": opt.spa_stop_iter,
+        "spa_delta_start": opt.spa_delta_start,
+        "spa_delta_end": opt.spa_delta_end,
+        "spa_interval_warm": opt.spa_interval_warm,
+        "spa_interval_stable": opt.spa_interval_stable,
+        "quota_update_interval": opt.quota_update_interval,
+        "kappa_total": kappa_total,
+        "keep_ratio": keep_ratio,
+        "target_descriptor": target_desc,
+        "alpha_occupancy": opt.alpha_occupancy,
+        "anchor_m_min": opt.anchor_m_min,
+        "age_grace_iters": opt.age_grace_iters,
+        "new_level_bootstrap_ratio": opt.new_level_bootstrap_ratio,
+        "hot_anchor_boost": opt.hot_anchor_boost,
+        "hysteresis_M_out": opt.hysteresis_M_out,
+        "hysteresis_M_in": opt.hysteresis_M_in,
+    }
+
+    if log_dir is not None:
+        run_meta_path = Path(log_dir) / "run_meta.json"
+        existing_meta = {}
+        if run_meta_path.exists():
+            try:
+                with open(run_meta_path, "r", encoding="utf-8") as f:
+                    existing_meta = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                existing_meta = {}
+        existing_meta["spa"] = spa_run_meta
+        try:
+            with open(run_meta_path, "w", encoding="utf-8") as f:
+                json.dump(existing_meta, f, indent=2, sort_keys=True)
+            log_fn(f"[SPA] run_meta saved to {str(run_meta_path)}")
+        except OSError as exc:
+            log_fn(f"[SPA][WARN] failed to write run_meta.json: {exc}")
+
+    spa_manager = None
+    spa_started = False
+    if spa_enabled:
+        from spa_core import SpaManager
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        spa_manager = SpaManager(
+            device,
+            logger,
+            spa_start_iter=opt.spa_start_iter,
+            spa_stop_iter=opt.spa_stop_iter,
+            spa_delta_start=opt.spa_delta_start,
+            spa_delta_end=opt.spa_delta_end,
+            spa_interval_warm=opt.spa_interval_warm,
+            spa_interval_stable=opt.spa_interval_stable,
+            quota_update_interval=opt.quota_update_interval,
+            kappa_total=kappa_total,
+            keep_ratio=keep_ratio,
+            alpha_occupancy=opt.alpha_occupancy,
+            anchor_m_min=opt.anchor_m_min,
+            age_grace_iters=opt.age_grace_iters,
+            hysteresis_M_out=opt.hysteresis_M_out,
+            hysteresis_M_in=opt.hysteresis_M_in,
+            new_level_bootstrap_ratio=opt.new_level_bootstrap_ratio,
+            hot_anchor_boost=opt.hot_anchor_boost,
+            log_dir=log_dir,
+            exp_name=exp_name,
+        )
+
+        log_fn(
+            f"[SPA] enable start={opt.spa_start_iter} stop={opt.spa_stop_iter} "
+            f"delta=[{opt.spa_delta_start}, {opt.spa_delta_end}] "
+            f"interval=[{opt.spa_interval_warm}, {opt.spa_interval_stable}] {target_desc}"
+        )
+
+    def maybe_start_spa():
+        nonlocal spa_started
+        if spa_manager is None or spa_started:
+            return
+        opacity = gaussians.get_opacity()
+        if not isinstance(opacity, torch.Tensor) or opacity.numel() == 0:
+            return
+        level_tensor = None
+        if hasattr(gaussians, "get_level"):
+            level_tensor = gaussians.get_level()
+            if isinstance(level_tensor, torch.Tensor):
+                level_tensor = level_tensor.detach()
+            else:
+                level_tensor = None
+        spa_manager.start(opacity.detach(), level=level_tensor, anchor_id=None)
+        spa_started = True
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -133,6 +293,8 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
 
+        maybe_start_spa()
+
         # Render
         if (iteration - 1) == debug_from:
             pipe.debug = True
@@ -152,7 +314,27 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             scaling_reg = scaling.prod(dim=1).mean()
         else:
             scaling_reg = torch.tensor(0.0, device="cuda")
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
+        loss_base = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * ssim_loss + 0.01*scaling_reg
+        loss = loss_base
+
+        if (
+            spa_manager is not None
+            and spa_started
+            and opt.spa_start_iter <= iteration <= opt.spa_stop_iter
+        ):
+            current_opacity = gaussians.get_opacity()
+            loss = spa_manager.append_loss(loss, current_opacity, iteration)
+            if iteration % 100 == 0:
+                with torch.no_grad():
+                    diff_norm = torch.norm(
+                        current_opacity.detach() - spa_manager.z.to(current_opacity.device)
+                    ).item()
+                log_fn = logger.info if logger is not None else print
+                log_fn(
+                    f"[SPA] iter={iteration} loss_base={loss_base.item():.6f} "
+                    f"loss_total={loss.item():.6f} #G={spa_manager.N} "
+                    f"||a-z||2={diff_norm:.6f}"
+                )
 
         loss.backward()
 
@@ -179,18 +361,104 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 # add statis
                 gaussians.training_statis(viewspace_point_tensor, opacity, visibility_filter, offset_selection_mask, voxel_visible_mask)
 
+                if spa_manager is not None and spa_started:
+                    total_points = spa_manager.N
+                    n_offsets = getattr(gaussians, "n_offsets", None)
+                    flat_count = offset_selection_mask.numel()
+                    if (
+                        isinstance(total_points, int)
+                        and total_points > 0
+                        and isinstance(n_offsets, int)
+                        and n_offsets > 0
+                        and flat_count == total_points * n_offsets
+                    ):
+                        selected_indices = torch.nonzero(offset_selection_mask, as_tuple=False).squeeze(-1)
+                        full_visibility = torch.zeros(flat_count, dtype=torch.bool, device=offset_selection_mask.device)
+                        if selected_indices.numel() == visibility_filter.numel():
+                            full_visibility[selected_indices] = visibility_filter
+                        anchor_visibility = full_visibility.view(total_points, n_offsets).any(dim=1)
+                        spa_manager.ingest_visibility(anchor_visibility)
+
+                        grad_full = torch.zeros(flat_count, dtype=torch.float32, device=offset_selection_mask.device)
+                        if (
+                            selected_indices.numel() == visibility_filter.numel()
+                            and viewspace_point_tensor.grad is not None
+                            and visibility_filter.any()
+                        ):
+                            grad_values = torch.norm(
+                                viewspace_point_tensor.grad[visibility_filter, :2],
+                                dim=-1,
+                            )
+                            grad_full[selected_indices[visibility_filter]] = grad_values
+                        grad_anchor = grad_full.view(total_points, n_offsets).mean(dim=1)
+                        grad_anchor = torch.nan_to_num(grad_anchor, nan=0.0, posinf=0.0, neginf=0.0)
+                        spa_manager.ingest_grad(grad_anchor)
+
+                        if iteration % 500 == 0:
+                            vis_mean = float(spa_manager.vis_hit_ema.mean().item())
+                            grad_mean = float(spa_manager.grad_ema.mean().item())
+                            log_fn = logger.info if logger is not None else print
+                            log_fn(
+                                f"[SPA] stats iter={iteration} vis_hit_ema={vis_mean:.6f} grad_ema={grad_mean:.6f}"
+                            )
+
                 # densification
                 if opt.update_anchor and iteration > opt.update_from and iteration % opt.update_interval == 0:
-                    gaussians.adjust_anchor(
-                        iteration=iteration,
-                        check_interval=opt.update_interval,
-                        success_threshold=opt.success_threshold,
-                        grad_threshold=opt.densify_grad_threshold,
-                        update_ratio=dataset.update_ratio,
-                        extra_ratio=dataset.extra_ratio,
-                        extra_up=dataset.extra_up,
-                        min_opacity=opt.min_opacity
+                    spa_keep_densify = getattr(opt, "spa_keep_densify", False)
+                    skip_densify = (
+                        spa_manager is not None
+                        and spa_started
+                        and getattr(spa_manager, "enabled", False)
+                        and opt.spa_start_iter <= iteration <= opt.spa_stop_iter
+                        and not spa_keep_densify
                     )
+                    if not skip_densify:
+                        anchor_accessor = getattr(gaussians, "get_anchor")
+                        anchor_tensor_before = anchor_accessor() if callable(anchor_accessor) else anchor_accessor
+                        N_before = int(anchor_tensor_before.shape[0])
+                        gaussians.adjust_anchor(
+                            iteration=iteration,
+                            check_interval=opt.update_interval,
+                            success_threshold=opt.success_threshold,
+                            grad_threshold=opt.densify_grad_threshold,
+                            update_ratio=dataset.update_ratio,
+                            extra_ratio=dataset.extra_ratio,
+                            extra_up=dataset.extra_up,
+                            min_opacity=opt.min_opacity
+                        )
+                        anchor_accessor_after = getattr(gaussians, "get_anchor")
+                        anchor_tensor_after = anchor_accessor_after() if callable(anchor_accessor_after) else anchor_accessor_after
+                        N_after = int(anchor_tensor_after.shape[0])
+                        if (
+                            spa_manager is not None
+                            and spa_started
+                            and spa_keep_densify
+                        ):
+                            current_opacity = gaussians.get_opacity()
+                            resized = False
+                            spa_N_before = spa_manager.N
+                            if isinstance(current_opacity, torch.Tensor):
+                                if N_after != spa_N_before:
+                                    spa_manager.resize_on_density(N_after, current_opacity.detach())
+                                    resized = N_after > spa_N_before
+                                level_tensor_attr = getattr(gaussians, "get_level", None)
+                                level_tensor = None
+                                if level_tensor_attr is not None:
+                                    level_value = level_tensor_attr() if callable(level_tensor_attr) else level_tensor_attr
+                                    if isinstance(level_value, torch.Tensor):
+                                        level_tensor = level_value.detach()
+                                anchor_id_attr = getattr(gaussians, "get_anchor_id", None)
+                                anchor_id_tensor = None
+                                if anchor_id_attr is not None:
+                                    anchor_id_value = anchor_id_attr() if callable(anchor_id_attr) else anchor_id_attr
+                                    if isinstance(anchor_id_value, torch.Tensor):
+                                        anchor_id_tensor = anchor_id_value.detach()
+                                if level_tensor is not None or anchor_id_tensor is not None:
+                                    spa_manager.set_meta(level_tensor, anchor_id_tensor)
+                            log_fn = logger.info if logger is not None else print
+                            log_fn(
+                                f"[SPA] densify iter={iteration} N_before={N_before} N_after={N_after} resized={resized}"
+                            )
             elif iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
@@ -201,6 +469,57 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             if iteration < opt.iterations:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
+            if (
+                spa_manager is not None
+                and spa_started
+                and getattr(spa_manager, "enabled", True)
+                and opt.spa_start_iter <= iteration <= opt.spa_stop_iter
+            ):
+                interval_val = spa_manager.interval(iteration)
+                if interval_val > 0 and iteration % interval_val == 0:
+                    current_opacity = gaussians.get_opacity()
+                    if isinstance(current_opacity, torch.Tensor):
+                        spa_manager.step_prox(current_opacity.detach(), iteration)
+            if (
+                spa_manager is not None
+                and spa_started
+                and iteration == opt.spa_stop_iter
+            ):
+                prune_mask = spa_manager.build_prune_mask()
+                removed = int(prune_mask.sum().item())
+                if removed > 0:
+                    anchor_tensor = gaussians.get_anchor()
+                    prune_mask_for_gaussians = prune_mask.to(
+                        device=anchor_tensor.device, dtype=torch.bool
+                    )
+                    gaussians.prune_points(prune_mask_for_gaussians)
+                spa_manager.apply_prune_mask(prune_mask)
+                remain_total = int(spa_manager.N)
+                per_level_remain = spa_manager.remaining_per_level()
+                if not per_level_remain:
+                    per_level_remain = {0: remain_total}
+                per_level_items = ", ".join(
+                    f"L{lvl}:{count}" for lvl, count in sorted(per_level_remain.items())
+                )
+                log_fn = logger.info if logger is not None else print
+                log_fn(
+                    f"[SPA] PRUNE: removed={removed} remain={remain_total} "
+                    f"per-layer remain={{ {per_level_items} }} "
+                    f"final_kappa_total={spa_manager.current_kappa_total()}"
+                )
+                pruned_checkpoint_path = os.path.join(scene.model_path, "chkpnt_pruned.pth")
+                torch.save((gaussians.capture(), iteration), pruned_checkpoint_path)
+                log_fn(f"[SPA] pruned checkpoint saved to {pruned_checkpoint_path}")
+                snapshot_paths = spa_manager.snapshot_logs(tag="pruned")
+                if snapshot_paths:
+                    log_fn(
+                        "[SPA] metrics snapshot saved: "
+                        + ", ".join(str(path) for path in snapshot_paths)
+                    )
+                else:
+                    log_fn("[SPA] metrics snapshot skipped (no log files)")
+                spa_manager.enabled = False
+                log_fn("[SPA] finetune phase: proximal updates paused")
             if (iteration in checkpoint_iterations):
                 logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
@@ -499,6 +818,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--gpu", type=str, default = '-1')
     args = parser.parse_args(sys.argv[1:])
+    apply_spa_preset_options(args, parser)
 
     # enable logging
     model_path = args.model_path

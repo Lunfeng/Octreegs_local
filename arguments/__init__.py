@@ -21,23 +21,37 @@ class GroupParams:
 class ParamGroup:
     def __init__(self, parser: ArgumentParser, name: str, fill_none=False):
         group = parser.add_argument_group(name)
-        for key, value in vars(self).items():
+        for orig_key, value in list(vars(self).items()):
             shorthand = False
-            if key.startswith("_"):
+            help_msg = None
+            default_value = value
+
+            if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], str):
+                default_value, help_msg = value
+                setattr(self, orig_key, default_value)
+
+            if orig_key.startswith("_"):
                 shorthand = True
-                key = key[1:]
-            t = type(value)
-            value = value if not fill_none else None
+                key = orig_key[1:]
+            else:
+                key = orig_key
+
+            arg_default = default_value if not fill_none else None
+            help_text = None
+            if help_msg is not None:
+                help_text = f"{help_msg} (default: {default_value})"
+
+            t = type(default_value)
             if shorthand:
                 if t == bool:
-                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, action="store_true")
+                    group.add_argument("--" + key, ("-" + key[0:1]), default=arg_default, action="store_true", help=help_text)
                 else:
-                    group.add_argument("--" + key, ("-" + key[0:1]), default=value, type=t)
+                    group.add_argument("--" + key, ("-" + key[0:1]), default=arg_default, type=t, help=help_text)
             else:
                 if t == bool:
-                    group.add_argument("--" + key, default=value, action="store_true")
+                    group.add_argument("--" + key, default=arg_default, action="store_true", help=help_text)
                 else:
-                    group.add_argument("--" + key, default=value, type=t)
+                    group.add_argument("--" + key, default=arg_default, type=t, help=help_text)
 
     def extract(self, args):
         group = GroupParams()
@@ -165,6 +179,26 @@ class OptimizationParams(ParamGroup):
         self.min_opacity = 0.005
         self.success_threshold = 0.8
         self.densify_grad_threshold = 0.0002
+
+        self.spa_preset = ("off", "SPA configuration preset: off (disabled), minimal (pause densify), or full (keep densify)")
+        self.spa_enable = (False, "Enable SPA-based sparsity management and proximal updates")
+        self.spa_start_iter = (12000, "Iteration to start SPA regularization steps")
+        self.spa_stop_iter = (25000, "Iteration to stop SPA regularization steps")
+        self.spa_delta_start = (3e-4, "Initial SPA quadratic penalty strength")
+        self.spa_delta_end = (1e-3, "Final SPA quadratic penalty strength")
+        self.spa_interval_warm = (60, "Iteration interval between SPA steps during warm-up phase")
+        self.spa_interval_stable = (40, "Iteration interval between SPA steps after warm-up")
+        self.quota_update_interval = (1000, "Iterations between SPA quota recalculations")
+        self.kappa_total = (300000, "Total target capacity for active SPA elements; set to 0 to defer to keep_ratio")
+        self.keep_ratio = (0.0, "Optional keep ratio for SPA capacity when kappa_total is unset (set >0 to enable)")
+        self.alpha_occupancy = (0.6, "Blend weight between visibility and gradient statistics for SPA quotas")
+        self.anchor_m_min = (1, "Minimum slots reserved per active anchor during SPA projection")
+        self.age_grace_iters = (2000, "Iterations granting young anchors guaranteed SPA slots")
+        self.new_level_bootstrap_ratio = (0.1, "Fraction of total capacity reserved for newly activated levels")
+        self.hot_anchor_boost = (1.0, "Score multiplier applied to hot anchors during SPA selection")
+        self.hysteresis_M_out = (3, "Consecutive misses before marking SPA entries for pruning")
+        self.hysteresis_M_in = (2, "Consecutive hits required to revive SPA entries from pruning")
+        self.spa_keep_densify = (False, "Keep densification active during SPA and resize SPA buffers when counts grow")
 
         super().__init__(parser, "Optimization Parameters")
 
