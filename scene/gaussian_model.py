@@ -163,29 +163,29 @@ class GaussianModel:
             self._anchor,
             self._level,
             self._offset,
-            self._local,
+            #self._local,
             self._scaling,
             self._rotation,
             self._opacity,
-            self.denom,
+            #self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
         )
 
     def restore(self, model_args, training_args):
-        (self.active_sh_degree,
+        (#self.active_sh_degree,
         self._anchor,
         self._level,
         self._offset,
-        self._local,
+        #self._local,
         self._scaling,
         self._rotation,
         self._opacity,
-        denom,
+        #denom,
         opt_dict,
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
-        self.denom = denom
+        #self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
     @property

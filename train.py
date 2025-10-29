@@ -248,9 +248,9 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         spa_manager.start(opacity.detach(), level=level_tensor, anchor_id=None)
         spa_started = True
 
-    if checkpoint:
-        (model_params, first_iter) = torch.load(checkpoint)
-        gaussians.restore(model_params, opt)
+    # if checkpoint:
+    #     (model_params, first_iter) = torch.load(checkpoint)
+    #     gaussians.restore(model_params, opt)
 
     iter_start = torch.cuda.Event(enable_timing = True)
     iter_end = torch.cuda.Event(enable_timing = True)
@@ -518,7 +518,7 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 spa_manager.enabled = False
                 log_fn("[SPA] finetune phase: proximal updates paused")
             if (iteration in checkpoint_iterations):
-                logger.info("\n[ITER {}] Saving Checkpoint".format(iteration))
+                logger.info("\n[ITER {}] Saving Checkpoint at {}".format(iteration, scene.model_path + "/chkpnt" + str(iteration) + ".pth"))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
 def prepare_output_and_logger(args):
