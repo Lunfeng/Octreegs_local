@@ -637,15 +637,23 @@ class GaussianModel:
         temp_opacity[temp_opacity<0] = 0
 
         temp_opacity = temp_opacity.view([-1, self.n_offsets])
+        
+        # Handle anchor growth: resize mask if it doesn't match current anchor count
+        if anchor_visible_mask.shape[0] != self.opacity_accum.shape[0]:
+            resized_mask = torch.zeros(self.opacity_accum.shape[0], dtype=torch.bool, device=anchor_visible_mask.device)
+            min_size = min(anchor_visible_mask.shape[0], self.opacity_accum.shape[0])
+            resized_mask[:min_size] = anchor_visible_mask[:min_size]
+            anchor_visible_mask = resized_mask
+        
         self.opacity_accum[anchor_visible_mask] += temp_opacity.sum(dim=1, keepdim=True)
 
         # update anchor visiting statis
         self.anchor_demon[anchor_visible_mask] += 1
 
         # update neural gaussian statis
-        anchor_visible_mask = anchor_visible_mask.unsqueeze(dim=1).repeat([1, self.n_offsets]).view(-1)
+        anchor_visible_mask_expanded = anchor_visible_mask.unsqueeze(dim=1).repeat([1, self.n_offsets]).view(-1)
         combined_mask = torch.zeros_like(self.offset_gradient_accum, dtype=torch.bool).squeeze(dim=1)
-        combined_mask[anchor_visible_mask] = offset_selection_mask
+        combined_mask[anchor_visible_mask_expanded] = offset_selection_mask
         temp_mask = combined_mask.clone()
         combined_mask[temp_mask] = update_filter
 
