@@ -651,9 +651,9 @@ class GaussianModel:
         self.anchor_demon[anchor_visible_mask] += 1
 
         # update neural gaussian statis
-        anchor_visible_mask = anchor_visible_mask.unsqueeze(dim=1).repeat([1, self.n_offsets]).view(-1)
+        anchor_visible_mask_expanded = anchor_visible_mask.unsqueeze(dim=1).repeat([1, self.n_offsets]).view(-1)
         combined_mask = torch.zeros_like(self.offset_gradient_accum, dtype=torch.bool).squeeze(dim=1)
-        combined_mask[anchor_visible_mask] = offset_selection_mask
+        combined_mask[anchor_visible_mask_expanded] = offset_selection_mask
         temp_mask = combined_mask.clone()
         combined_mask[temp_mask] = update_filter
 
