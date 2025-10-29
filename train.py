@@ -235,12 +235,12 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
         nonlocal spa_started
         if spa_manager is None or spa_started:
             return
-        opacity = gaussians.get_opacity()
+        opacity = gaussians.get_opacity
         if not isinstance(opacity, torch.Tensor) or opacity.numel() == 0:
             return
         level_tensor = None
         if hasattr(gaussians, "get_level"):
-            level_tensor = gaussians.get_level()
+            level_tensor = gaussians.get_level
             if isinstance(level_tensor, torch.Tensor):
                 level_tensor = level_tensor.detach()
             else:
@@ -322,7 +322,7 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             and spa_started
             and opt.spa_start_iter <= iteration <= opt.spa_stop_iter
         ):
-            current_opacity = gaussians.get_opacity()
+            current_opacity = gaussians.get_opacity
             loss = spa_manager.append_loss(loss, current_opacity, iteration)
             if iteration % 100 == 0:
                 with torch.no_grad():
@@ -429,36 +429,33 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                         anchor_accessor_after = getattr(gaussians, "get_anchor")
                         anchor_tensor_after = anchor_accessor_after() if callable(anchor_accessor_after) else anchor_accessor_after
                         N_after = int(anchor_tensor_after.shape[0])
-                        if (
-                            spa_manager is not None
-                            and spa_started
-                            and spa_keep_densify
-                        ):
-                            current_opacity = gaussians.get_opacity()
-                            resized = False
-                            spa_N_before = spa_manager.N
+                        resized = False
+                        if spa_manager is not None and spa_started:
+                            current_opacity = gaussians.get_opacity
+                            level_tensor_attr = getattr(gaussians, "get_level", None)
+                            level_tensor = None
+                            if level_tensor_attr is not None:
+                                level_value = level_tensor_attr() if callable(level_tensor_attr) else level_tensor_attr
+                                if isinstance(level_value, torch.Tensor):
+                                    level_tensor = level_value.detach()
+                            anchor_id_attr = getattr(gaussians, "get_anchor_id", None)
+                            anchor_id_tensor = None
+                            if anchor_id_attr is not None:
+                                anchor_id_value = anchor_id_attr() if callable(anchor_id_attr) else anchor_id_attr
+                                if isinstance(anchor_id_value, torch.Tensor):
+                                    anchor_id_tensor = anchor_id_value.detach()
                             if isinstance(current_opacity, torch.Tensor):
-                                if N_after != spa_N_before:
-                                    spa_manager.resize_on_density(N_after, current_opacity.detach())
-                                    resized = N_after > spa_N_before
-                                level_tensor_attr = getattr(gaussians, "get_level", None)
-                                level_tensor = None
-                                if level_tensor_attr is not None:
-                                    level_value = level_tensor_attr() if callable(level_tensor_attr) else level_tensor_attr
-                                    if isinstance(level_value, torch.Tensor):
-                                        level_tensor = level_value.detach()
-                                anchor_id_attr = getattr(gaussians, "get_anchor_id", None)
-                                anchor_id_tensor = None
-                                if anchor_id_attr is not None:
-                                    anchor_id_value = anchor_id_attr() if callable(anchor_id_attr) else anchor_id_attr
-                                    if isinstance(anchor_id_value, torch.Tensor):
-                                        anchor_id_tensor = anchor_id_value.detach()
-                                if level_tensor is not None or anchor_id_tensor is not None:
-                                    spa_manager.set_meta(level_tensor, anchor_id_tensor)
-                            log_fn = logger.info if logger is not None else print
-                            log_fn(
-                                f"[SPA] densify iter={iteration} N_before={N_before} N_after={N_after} resized={resized}"
-                            )
+                                resized = spa_manager.sync_state(
+                                    current_opacity.detach(),
+                                    level=level_tensor,
+                                    anchor_id=anchor_id_tensor,
+                                )
+                            elif level_tensor is not None or anchor_id_tensor is not None:
+                                spa_manager.set_meta(level_tensor, anchor_id_tensor)
+                        log_fn = logger.info if logger is not None else print
+                        log_fn(
+                            f"[SPA] densify iter={iteration} N_before={N_before} N_after={N_after} resized={resized}"
+                        )
             elif iteration == opt.update_until:
                 del gaussians.opacity_accum
                 del gaussians.offset_gradient_accum
@@ -477,7 +474,7 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
             ):
                 interval_val = spa_manager.interval(iteration)
                 if interval_val > 0 and iteration % interval_val == 0:
-                    current_opacity = gaussians.get_opacity()
+                    current_opacity = gaussians.get_opacity
                     if isinstance(current_opacity, torch.Tensor):
                         spa_manager.step_prox(current_opacity.detach(), iteration)
             if (
@@ -488,7 +485,7 @@ def training(dataset, opt, pipe, dataset_name, testing_iterations, saving_iterat
                 prune_mask = spa_manager.build_prune_mask()
                 removed = int(prune_mask.sum().item())
                 if removed > 0:
-                    anchor_tensor = gaussians.get_anchor()
+                    anchor_tensor = gaussians.get_anchor
                     prune_mask_for_gaussians = prune_mask.to(
                         device=anchor_tensor.device, dtype=torch.bool
                     )

@@ -103,15 +103,32 @@ class SpaManager:
         level: Optional[Tensor] = None,
         anchor_id: Optional[Tensor] = None,
     ) -> None:
-        a0 = a0.to(self.device)
-        self.N = int(a0.shape[0])
-        self.z = a0.detach().clone()
+        self._reset_state(a0, level, anchor_id)
+        self._register_level_first_seen(self.spa_start_iter)
+        self._prepare_logging_files()
+        self._log_start()
+
+    def _flatten1d(self, t: Optional[Tensor]) -> Optional[Tensor]:
+        if t is None:
+            return None
+        return t.reshape(-1)
+
+    def _reset_state(
+        self,
+        a: Tensor,
+        level: Optional[Tensor],
+        anchor_id: Optional[Tensor],
+    ) -> None:
+        a = a.to(self.device)
+        self.N = int(a.shape[0])
+        self.z = a.detach().clone()
         self.lam = torch.zeros_like(self.z, device=self.device)
         self.age = torch.zeros(self.N, device=self.device, dtype=torch.float32)
         self.vis_hit_ema = torch.zeros(self.N, device=self.device, dtype=torch.float32)
         self.grad_ema = torch.zeros(self.N, device=self.device, dtype=torch.float32)
         self.alive_counter = torch.zeros(self.N, device=self.device, dtype=torch.long)
         self.dead_counter = torch.zeros(self.N, device=self.device, dtype=torch.long)
+
         missing_level = level is None
         missing_anchor = anchor_id is None
         self._fallback_single_layer = missing_level or missing_anchor
@@ -120,23 +137,26 @@ class SpaManager:
             self.level = torch.zeros(self.N, device=self.device, dtype=torch.long)
             self.anchor_id = torch.zeros(self.N, device=self.device, dtype=torch.long)
             if not self._fallback_warned:
-                self._log(
-                    "[SPA][WARN] level/anchor_id not provided, fallback to single-layer top-k."
-                )
+                self._log("[SPA][WARN] level/anchor_id not provided, fallback to single-layer top-k.")
                 self._fallback_warned = True
         else:
-            self.level = level.to(self.device).long()
-            self.anchor_id = anchor_id.to(self.device).long()
+            self.level = self._flatten1d(level.to(self.device).long())
+            self.anchor_id = self._flatten1d(anchor_id.to(self.device).long())
+
         self.level_first_seen.clear()
         self.level_quota.clear()
         self._last_quota_iter = None
         self._last_iteration = None
-        self._register_level_first_seen(self.spa_start_iter)
-        self._prepare_logging_files()
-        self._log_start()
+
 
     def append_loss(self, loss: Tensor, a: Tensor, iteration: int) -> Tensor:
         self._ensure_started()
+        if a.shape[0] != self.N:
+            resized = self.sync_state(a)
+            if resized:
+                self._log(
+                    f"[SPA][WARN] state synchronized to match opacity count during loss append"
+                )
         delta_val = self.delta(iteration)
         residual = a - self.z + self.lam
         penalty = 0.5 * delta_val * torch.sum(residual * residual)
@@ -153,15 +173,15 @@ class SpaManager:
         self.grad_ema.mul_(0.9).add_(0.1 * point_grad_norm)
 
     def set_meta(
-        self,
-        level: Optional[Tensor],
-        anchor_id: Optional[Tensor],
+            self,
+            level: Optional[Tensor],
+            anchor_id: Optional[Tensor],
     ) -> None:
         if level is not None:
-            self.level = level.to(self.device).long()
+            self.level = self._flatten1d(level.to(self.device).long())
             self._register_level_first_seen(self._last_iteration or self.spa_start_iter)
         if anchor_id is not None:
-            self.anchor_id = anchor_id.to(self.device).long()
+            self.anchor_id = self._flatten1d(anchor_id.to(self.device).long())
 
     def step_prox(self, a: Tensor, iteration: int) -> None:
         self._ensure_started()
@@ -302,37 +322,7 @@ class SpaManager:
         prune_mask = prune_mask.to(self.device, dtype=torch.bool)
         if prune_mask.numel() != self.N:
             raise ValueError("Prune mask size mismatch with managed tensor count")
-        keep_mask = ~prune_mask
-        keep_total = int(keep_mask.sum().item())
-        if keep_total == self.N:
-            return
-
-        def _mask_optional(tensor: Optional[Tensor]) -> Optional[Tensor]:
-            if tensor is None:
-                return None
-            return tensor[keep_mask]
-
-        self.z = self.z[keep_mask]
-        self.lam = self.lam[keep_mask]
-        self.age = self.age[keep_mask]
-        self.vis_hit_ema = self.vis_hit_ema[keep_mask]
-        self.grad_ema = self.grad_ema[keep_mask]
-        self.alive_counter = self.alive_counter[keep_mask]
-        self.dead_counter = self.dead_counter[keep_mask]
-        self.level = _mask_optional(self.level)
-        self.anchor_id = _mask_optional(self.anchor_id)
-        self.N = keep_total
-
-        remaining_levels = set()
-        if self.N > 0:
-            for lvl in torch.unique(self._get_levels()).tolist():
-                remaining_levels.add(int(lvl))
-        for lvl in list(self.level_first_seen.keys()):
-            if lvl not in remaining_levels:
-                self.level_first_seen.pop(lvl, None)
-        for lvl in list(self.level_quota.keys()):
-            if lvl not in remaining_levels:
-                self.level_quota.pop(lvl, None)
+        self._apply_keep_mask(~prune_mask)
 
     def remaining_per_level(self) -> Dict[int, int]:
         self._ensure_started()
@@ -377,14 +367,49 @@ class SpaManager:
             torch.zeros(addN, device=self.device, dtype=torch.long),
         ], dim=0)
         if self.level is not None:
+            self.level = self._flatten1d(self.level)
             last_level = self.level[-1]
             level_pad = torch.full((addN,), int(last_level.item()), device=self.device, dtype=torch.long)
             self.level = torch.cat([self.level, level_pad], dim=0)
         if self.anchor_id is not None:
+            self.anchor_id = self._flatten1d(self.anchor_id)
             last_anchor = self.anchor_id[-1]
             anchor_pad = torch.full((addN,), int(last_anchor.item()), device=self.device, dtype=torch.long)
             self.anchor_id = torch.cat([self.anchor_id, anchor_pad], dim=0)
         self.N = newN
+
+    def shrink_to_count(self, newN: int) -> None:
+        self._ensure_started()
+        if newN >= self.N:
+            return
+        self._log(f"[SPA][WARN] shrink_to_count reducing anchors from {self.N} to {newN}")
+        keep_mask = torch.zeros(self.N, device=self.device, dtype=torch.bool)
+        keep_mask[:newN] = True
+        self._apply_keep_mask(keep_mask)
+
+    def sync_state(
+        self,
+        a: Tensor,
+        level: Optional[Tensor] = None,
+        anchor_id: Optional[Tensor] = None,
+    ) -> bool:
+        self._ensure_started()
+        a = a.to(self.device)
+        oldN = self.N
+        newN = int(a.shape[0])
+        resized = False
+        if newN > self.N:
+            self.resize_on_density(newN, a)
+            resized = True
+        elif newN < self.N:
+            self.shrink_to_count(newN)
+            self.z = a.detach().clone()
+            resized = True
+        if level is not None or anchor_id is not None:
+            self.set_meta(level, anchor_id)
+        if resized:
+            self._log(f"[SPA] sync_state resized anchors from {oldN} to {self.N}")
+        return resized
 
     def interval(self, iteration: int) -> int:
         if iteration < self.spa_start_iter + 3000:
@@ -407,14 +432,49 @@ class SpaManager:
         if self.z is None or self.lam is None:
             raise RuntimeError("SpaManager.start must be called before using the manager")
 
+    def _apply_keep_mask(self, keep_mask: Tensor) -> None:
+        keep_mask = keep_mask.to(self.device, dtype=torch.bool)
+        if keep_mask.numel() != self.N:
+            raise ValueError("Keep mask size mismatch with managed tensor count")
+        keep_total = int(keep_mask.sum().item())
+        if keep_total == self.N:
+            return
+
+        def _mask_optional(tensor: Optional[Tensor]) -> Optional[Tensor]:
+            if tensor is None:
+                return None
+            return tensor[keep_mask]
+
+        self.z = self.z[keep_mask]
+        self.lam = self.lam[keep_mask]
+        self.age = self.age[keep_mask]
+        self.vis_hit_ema = self.vis_hit_ema[keep_mask]
+        self.grad_ema = self.grad_ema[keep_mask]
+        self.alive_counter = self.alive_counter[keep_mask]
+        self.dead_counter = self.dead_counter[keep_mask]
+        self.level = self._flatten1d(_mask_optional(self.level))
+        self.anchor_id = self._flatten1d(_mask_optional(self.anchor_id))
+        self.N = keep_total
+
+        remaining_levels = set()
+        if self.N > 0:
+            for lvl in torch.unique(self._get_levels()).tolist():
+                remaining_levels.add(int(lvl))
+        for lvl in list(self.level_first_seen.keys()):
+            if lvl not in remaining_levels:
+                self.level_first_seen.pop(lvl, None)
+        for lvl in list(self.level_quota.keys()):
+            if lvl not in remaining_levels:
+                self.level_quota.pop(lvl, None)
+
     def _get_levels(self) -> Tensor:
         if self.level is not None:
-            return self.level
+            return self.level.reshape(-1)
         return torch.zeros(self.N, device=self.device, dtype=torch.long)
 
     def _get_anchors(self) -> Tensor:
         if self.anchor_id is not None:
-            return self.anchor_id
+            return self.anchor_id.reshape(-1)
         levels = self._get_levels()
         return levels
 

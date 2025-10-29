@@ -180,10 +180,10 @@ class OptimizationParams(ParamGroup):
         self.success_threshold = 0.8
         self.densify_grad_threshold = 0.0002
 
-        self.spa_preset = ("off", "SPA configuration preset: off (disabled), minimal (pause densify), or full (keep densify)")
+        self.spa_preset = ("minimal", "SPA configuration preset: off (disabled), minimal (pause densify), or full (keep densify)")
         self.spa_enable = (False, "Enable SPA-based sparsity management and proximal updates")
-        self.spa_start_iter = (12000, "Iteration to start SPA regularization steps")
-        self.spa_stop_iter = (25000, "Iteration to stop SPA regularization steps")
+        self.spa_start_iter = (5000, "Iteration to start SPA regularization steps")
+        self.spa_stop_iter = (8000, "Iteration to stop SPA regularization steps")
         self.spa_delta_start = (3e-4, "Initial SPA quadratic penalty strength")
         self.spa_delta_end = (1e-3, "Final SPA quadratic penalty strength")
         self.spa_interval_warm = (60, "Iteration interval between SPA steps during warm-up phase")
